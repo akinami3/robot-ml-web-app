@@ -15,7 +15,7 @@ sequenceDiagram
 
   backend ->> mqtt_broker: broker接続確立
   robot ->> mqtt_broker: broker接続確立
-  Note right of backend: 以降backend<->robot間で、MQTT通信を実施<br>各トピックごとのやり取りは、別途シーケンス図を参照
+  Note right of backend: 以降backend<->robot間で、MQTT通信を実施<br>各トピックごとのやり取りは、「トピック別シーケンス図」を参照
 ```
 
 ## トピック別シーケンス図
