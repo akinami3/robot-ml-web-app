@@ -27,6 +27,10 @@ sequenceDiagram
 
 の形式で記載しています。
 
+<br>
+
+なお、各トピックの「<AMR_ID>」は **各AMRに割り当てられたID** に置き換えて読んでください
+
 ### /amr/<AMR_ID>/velocity　【速度制御】
 
 指定した速度情報（並進、回転）に基づき、AMRを移動させます。
@@ -38,7 +42,6 @@ sequenceDiagram
 
   loop
     alt　速度指令受信時
-      Note right of backend: <AMR_ID>は各AMRに割り当てられた<br>IDに置き換えて読んでください
       backend ->> mqtt_broker: AMR速度（並進速度、回転速度）<br>トピック名：/amr/<AMR_ID>/velocity
       mqtt_broker ->> robot: AMR速度（並進速度、回転速度）<br>トピック名：/amr/<AMR_ID>/velocity
       robot ->> robot: 速度情報に従って、AMRが移動
