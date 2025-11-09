@@ -1,5 +1,37 @@
 # robot-ml-web-app
 
+
+# シーケンス図
+
+```mermaid
+sequenceDiagram
+  participant backend
+  participant mqtt_broker
+  participant robot as robot (real or sim)
+
+  backend ->> mqtt_broker: broker接続確立
+  robot ->> mqtt_broker: broker接続確立
+  
+  par
+    loop 定周期
+      robot ->> robot: 現在位置を取得
+      robot -> mqtt_broker: AMR状態（位置、姿勢など）
+      mqtt_broker ->> backend: AMR状態（位置、姿勢など）
+    end
+  end
+
+  loop
+    alt　ジョイスティック操作時
+      backend ->> mqtt_broker: AMR速度（並進速度、回転速度）
+      mqtt_broker ->> robot: AMR速度（並進速度、回転速度）
+      robot ->> robot: 速度情報に従って、AMRが移動
+    end
+  end
+
+```
+
+以下、copilot生成による仮の設計書
+
 ## 目次
 - [1. ゴールとスコープ](#1-ゴールとスコープ)
 - [2. ユースケース概要](#2-ユースケース概要)
@@ -366,6 +398,9 @@ erDiagram
 | WebSocket `/ws/chat` | ストリーミング回答 | Backend ↔ Frontend |
 
 ## 7. シーケンス図
+
+
+
 ### 7.1 ロボット速度制御 (ジョイスティック)
 ```mermaid
 sequenceDiagram
