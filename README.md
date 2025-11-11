@@ -99,6 +99,10 @@ Payload
       - [AMR速度指令](#amr速度指令)
       - [AMR状態](#amr状態)
   - [目次](#目次)
+  - [0. ディレクトリ構成](#0-ディレクトリ構成)
+    - [0.1 全体構成](#01-全体構成)
+    - [0.2 フロントエンド詳細](#02-フロントエンド詳細)
+    - [0.3 バックエンド詳細](#03-バックエンド詳細)
   - [1. ゴールとスコープ](#1-ゴールとスコープ)
   - [2. ユースケース概要](#2-ユースケース概要)
   - [3. 全体アーキテクチャ](#3-全体アーキテクチャ)
@@ -123,9 +127,325 @@ Payload
     - [7.4 ナビゲーション指示](#74-ナビゲーション指示)
     - [7.5 機械学習トレーニング](#75-機械学習トレーニング)
     - [7.6 Chatbot (RAG 質問応答)](#76-chatbot-rag-質問応答)
+  - [7.7 バックエンド内 - Robot API 変換フロー](#77-バックエンド内---robot-api-変換フロー)
+  - [7.8 バックエンド内 - センサデータ取得・保存フロー](#78-バックエンド内---センサデータ取得保存フロー)
+  - [7.9 バックエンド内 - ML トレーニングと データ連携](#79-バックエンド内---ml-トレーニングと-データ連携)
+  - [7.10 バックエンド内 - Chatbot 質問応答フロー](#710-バックエンド内---chatbot-質問応答フロー)
+  - [7.11 バックエンド内 - データ層 統合ビュー](#711-バックエンド内---データ層-統合ビュー)
   - [8. 非機能要件](#8-非機能要件)
   - [9. セキュリティと監視](#9-セキュリティと監視)
   - [10. 将来的な拡張ポイント](#10-将来的な拡張ポイント)
+
+## 0. ディレクトリ構成
+
+### 0.1 全体構成
+
+```
+robot-ml-web-app/
+├── frontend/                       # React フロントエンド
+│   ├── public/
+│   ├── src/
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── vite.config.ts
+├── backend/                        # FastAPI バックエンド
+│   ├── app/
+│   ├── requirements.txt
+│   ├── pyproject.toml
+│   └── Dockerfile
+├── mqtt-broker/                    # Mosquitto MQTT ブローカー
+│   └── mosquitto.conf
+├── docker-compose.yml              # 全サービス統合起動
+├── README.md                       # このファイル
+└── docs/                          # ドキュメント
+    ├── API_SPEC.md
+    ├── DEPLOYMENT.md
+    └── TROUBLESHOOTING.md
+```
+
+### 0.2 フロントエンド詳細
+
+```
+frontend/src/
+├── app/
+│   ├── App.tsx                     # メインアプリケーションコンポーネント
+│   ├── Router.tsx                  # タブナビゲーション
+│   ├── store/                      # Redux/Zustand 状態管理
+│   │   ├── slices/
+│   │   │   ├── robotSlice.ts
+│   │   │   ├── mlSlice.ts
+│   │   │   ├── telemetrySlice.ts
+│   │   │   └── chatSlice.ts
+│   │   └── index.ts
+│   ├── hooks/
+│   │   ├── useWebSocket.ts         # WebSocket カスタムフック
+│   │   ├── useConnectionStatus.ts  # 接続状態監視
+│   │   └── useAsync.ts
+│   └── api/
+│       ├── axiosConfig.ts          # axios インスタンス
+│       ├── robotApi.ts
+│       ├── mlApi.ts
+│       ├── telemetryApi.ts
+│       └── chatbotApi.ts
+│
+├── modules/                        # タブ毎の独立モジュール
+│   │
+│   ├── robot-control/
+│   │   ├── components/
+│   │   │   ├── JoystickPanel.tsx
+│   │   │   ├── RobotStatus.tsx
+│   │   │   ├── VideoStream.tsx
+│   │   │   ├── NavigationMap.tsx
+│   │   │   └── SimulationToggle.tsx
+│   │   ├── hooks/
+│   │   │   └── useRobotControl.ts
+│   │   ├── services/
+│   │   │   └── robotService.ts
+│   │   └── index.tsx               # タブのエントリポイント
+│   │
+│   ├── database/
+│   │   ├── components/
+│   │   │   ├── DataLoggerControl.tsx
+│   │   │   ├── SessionList.tsx
+│   │   │   ├── DataPreview.tsx
+│   │   │   └── SessionStatus.tsx
+│   │   ├── hooks/
+│   │   │   └── useDataLogger.ts
+│   │   ├── services/
+│   │   │   └── dataloggerService.ts
+│   │   └── index.tsx
+│   │
+│   ├── ml/
+│   │   ├── components/
+│   │   │   ├── TrainingControl.tsx
+│   │   │   ├── HyperparameterForm.tsx
+│   │   │   ├── MetricsChart.tsx
+│   │   │   ├── TrainingHistory.tsx
+│   │   │   └── ModelComparison.tsx
+│   │   ├── hooks/
+│   │   │   └── useMLTraining.ts
+│   │   ├── services/
+│   │   │   └── mlService.ts
+│   │   └── index.tsx
+│   │
+│   └── chatbot/
+│       ├── components/
+│       │   ├── ChatWindow.tsx
+│       │   ├── MessageList.tsx
+│       │   ├── QueryInput.tsx
+│       │   ├── DocumentPreview.tsx
+│       │   └── ChatHistory.tsx
+│       ├── hooks/
+│       │   └── useChatbot.ts
+│       ├── services/
+│       │   └── chatbotService.ts
+│       └── index.tsx
+│
+├── shared/
+│   ├── components/
+│   │   ├── Header.tsx              # ヘッダー（共通）
+│   │   ├── TabNav.tsx              # タブナビゲーション
+│   │   ├── ConnectionStatus.tsx    # 接続ステータスインジケータ
+│   │   ├── LoadingSpinner.tsx
+│   │   └── ErrorBoundary.tsx
+│   ├── icons/                      # SVG アイコン
+│   │   ├── RobotIcon.tsx
+│   │   ├── DatabaseIcon.tsx
+│   │   ├── MLIcon.tsx
+│   │   ├── ChatIcon.tsx
+│   │   ├── WifiIcon.tsx
+│   │   └── MqttIcon.tsx
+│   ├── layouts/
+│   │   ├── AppLayout.tsx           # 全体レイアウト
+│   │   └── TabLayout.tsx           # タブ内レイアウト
+│   ├── utils/
+│   │   ├── formatters.ts           # データフォーマット関数
+│   │   ├── validators.ts           # 入力検証
+│   │   ├── constants.ts            # 定数
+│   │   └── logger.ts               # クライアント側ログ
+│   ├── types/
+│   │   ├── robot.ts                # ロボット制御型定義
+│   │   ├── telemetry.ts            # センサデータ型定義
+│   │   ├── ml.ts                   # ML型定義
+│   │   ├── chat.ts                 # チャット型定義
+│   │   └── api.ts                  # API通信型定義
+│   └── styles/
+│       ├── globals.css
+│       └── theme.css
+│
+├── index.tsx                       # エントリポイント
+└── vite-env.d.ts
+```
+
+### 0.3 バックエンド詳細
+
+```
+backend/app/
+├── main.py                         # FastAPI アプリケーション初期化
+├── core/
+│   ├── __init__.py
+│   ├── config.py                   # 環境変数、設定管理
+│   ├── logging.py                  # ロギング設定
+│   ├── dependencies.py             # 依存性注入
+│   ├── exceptions.py               # カスタム例外
+│   └── security.py                 # JWT, OAuth2 設定
+│
+├── api/
+│   ├── __init__.py
+│   ├── router.py                   # API 統一ルーター
+│   │
+│   ├── robot_api/                  # 1️⃣ Robot API 変換
+│   │   ├── __init__.py
+│   │   ├── router.py               # POST /robot/velocity, /navigation
+│   │   ├── schemas.py              # VelocityCommand, NavigationGoal
+│   │   └── models.py               # (オプション) ローカルモデル
+│   │
+│   ├── telemetry/                  # 3️⃣ センサデータ取得・保存
+│   │   ├── __init__.py
+│   │   ├── router.py               # POST /datalogger/session, GET /sessions
+│   │   ├── schemas.py              # TelemetryLog, SessionConfig
+│   │   └── models.py
+│   │
+│   ├── ml/                         # 2️⃣ 機械学習
+│   │   ├── __init__.py
+│   │   ├── router.py               # POST /ml/train, GET /ml/runs/{id}
+│   │   ├── schemas.py              # TrainingConfig, MetricSnapshot
+│   │   └── models.py
+│   │
+│   └── chatbot/                    # 4️⃣ Chatbot
+│       ├── __init__.py
+│       ├── router.py               # POST /chat/query, GET /chat/history
+│       ├── schemas.py              # QueryRequest, ChatResponse
+│       └── models.py
+│
+├── services/                       # ビジネスロジック層（役割別分離）
+│   ├── __init__.py
+│   ├── robot_control.py            # RobotControlService
+│   │                               # - set_velocity()
+│   │                               # - send_navigation()
+│   │                               # - toggle_simulation()
+│   │
+│   ├── telemetry_processor.py      # TelemetryProcessorService
+│   │                               # - handle_mqtt_message()
+│   │                               # - preprocess_data()
+│   │
+│   ├── datalogger.py               # DataLoggerService
+│   │                               # - start_session()
+│   │                               # - save_session()
+│   │                               # - discard_session()
+│   │
+│   ├── ml_pipeline.py              # MLPipelineService
+│   │                               # - launch_training()
+│   │                               # - stream_metrics()
+│   │                               # - stop_training()
+│   │
+│   └── chatbot_engine.py           # ChatbotService
+│                                   # - retrieve_context()
+│                                   # - generate_response()
+│
+├── repositories/                   # データアクセス層（DB/Storage操作）
+│   ├── __init__.py
+│   ├── base.py                     # BaseRepository
+│   ├── robot_state.py              # RobotStateRepository
+│   ├── sensor_data.py              # SensorDataRepository
+│   │                               # - create(), list_by_session()
+│   │                               # - export_for_training()
+│   │
+│   ├── training_runs.py            # TrainingRunRepository
+│   │                               # - create_run(), update_metrics()
+│   │
+│   ├── training_metrics.py         # TrainingMetricRepository
+│   │
+│   └── rag_documents.py            # RAGDocumentRepository
+│                                   # - index_document(), search()
+│
+├── models/                         # SQLAlchemy ORM モデル
+│   ├── __init__.py
+│   ├── robot_state.py              # RobotState テーブル
+│   ├── sensor_data.py              # SensorData テーブル
+│   ├── dataset_session.py          # DatasetSession テーブル
+│   ├── training_run.py             # TrainingRun テーブル
+│   ├── training_metric.py          # TrainingMetric テーブル
+│   └── rag_document.py             # RAGDocument テーブル
+│
+├── adapters/                       # 外部システム統合（プロトコル、SDK抽象化）
+│   ├── __init__.py
+│   ├── mqtt_client.py              # MQTTClientAdapter
+│   │                               # - publish(), subscribe_with_callback()
+│   │
+│   ├── websocket_manager.py        # WebSocketHub
+│   │                               # - broadcast_to_channel()
+│   │                               # - send_to_client()
+│   │
+│   ├── storage_client.py           # StorageClient
+│   │                               # - upload_image(), download_file()
+│   │
+│   ├── vector_store.py             # VectorStoreAdapter
+│   │                               # - index_document(), similarity_search()
+│   │
+│   └── llm_client.py               # LLMClientAdapter
+│                                   # - generate(), stream_response()
+│
+├── workers/                        # 非同期タスク（Celery/RQ）
+│   ├── __init__.py
+│   ├── tasks.py                    # @celery.task デコレータタスク
+│   │                               # - train_model_task()
+│   │                               # - process_batch_telemetry()
+│   │
+│   └── celery_app.py               # Celery アプリ初期化
+│
+├── schemas/                        # Pydantic スキーマ（集約）
+│   ├── __init__.py
+│   ├── robot.py                    # VelocityCommand など
+│   ├── telemetry.py                # TelemetryLog など
+│   ├── ml.py                       # TrainingConfig など
+│   └── chat.py                     # QueryRequest など
+│
+├── utils/
+│   ├── __init__.py
+│   ├── validators.py               # 入力検証関数
+│   ├── formatters.py               # データフォーマット
+│   ├── logger.py                   # ログ設定
+│   ├── constants.py                # 定数
+│   └── helpers.py                  # ヘルパー関数
+│
+├── database/
+│   ├── __init__.py
+│   ├── session.py                  # SQLAlchemy セッション管理
+│   ├── engine.py                   # DB エンジン初期化
+│   └── migrations/                 # Alembic マイグレーション
+│       ├── versions/
+│       └── env.py
+│
+├── websocket/
+│   ├── __init__.py
+│   ├── manager.py                  # WebSocket接続管理
+│   ├── handlers.py                 # メッセージハンドラ
+│   └── subscriptions.py            # チャネル購読管理
+│
+├── jobs/                           # 長時間実行ジョブ
+│   ├── __init__.py
+│   ├── training_job.py             # PyTorch学習実行
+│   ├── data_export_job.py          # データ抽出
+│   └── rag_indexing_job.py         # Vector DB インデックス
+│
+├── config/
+│   ├── __init__.py
+│   ├── settings.py                 # Pydantic Settings
+│   └── secrets.py                  # シークレット管理
+│
+└── tests/
+    ├── __init__.py
+    ├── conftest.py                 # pytest フィクスチャ
+    ├── test_robot_api.py
+    ├── test_ml_service.py
+    ├── test_telemetry.py
+    ├── test_chatbot.py
+    └── integration/
+        └── test_end_to_end.py
+```
+
+---
 
 ## 1. ゴールとスコープ
 - React + FastAPI を基盤としたロボット運用統合 Web アプリを構築する。
@@ -591,6 +911,227 @@ sequenceDiagram
     API-->>UI: WS/HTTP chunk push
     UI-->>User: レスポンス表示 + 参照リンク
 ```
+
+## 7.7 バックエンド内 - Robot API 変換フロー
+
+```mermaid
+sequenceDiagram
+    participant Frontend
+    participant Router as API Router<br>(robot_api/)
+    participant Service as RobotControlService
+    participant Adapter as MQTTClientAdapter
+    participant WS as WebSocketHub
+    participant Robot
+
+    Frontend->>Router: POST /robot/velocity
+    Router->>Router: バリデーション
+    Router->>Service: set_velocity(VelocityCommand)
+    Service->>Adapter: publish(/amr/*/velocity)
+    Adapter->>Robot: MQTT送信
+    Robot-->>Adapter: /amr/*/status応答
+    Adapter-->>Service: telemetry callback
+    Service->>WS: broadcast(robot_state)
+    WS-->>Frontend: WebSocket更新
+```
+
+**役割:**
+- **Router**: HTTP リクエスト受け取り、スキーマチェック
+- **Service**: ビジネスロジック（速度制限、割り込み判定など）
+- **Adapter**: MQTT プロトコル操作、再接続管理
+
+---
+
+## 7.8 バックエンド内 - センサデータ取得・保存フロー
+
+```mermaid
+sequenceDiagram
+    participant MQTT as MQTT Broker
+    participant Listener as MQTTClientAdapter
+    participant Service as TelemetryProcessorService
+    participant Logger as DataLoggerService
+    participant Storage as ImageStorage
+    participant DB as SQLDatabase
+    participant Repo as SensorDataRepository
+
+    loop 定周期 (10Hz)
+        MQTT->>Listener: /amr/*/status
+        Listener->>Service: handle_telemetry(message)
+        alt セッション進行中
+            Service->>Logger: append_to_session(id, data)
+            Logger->>Storage: save_image_async(image_path)
+            Logger->>Repo: persist_telemetry(session_id, fields)
+            Repo->>DB: INSERT INTO sensor_data
+        else セッション未開始
+            Service-->>Service: drop message
+        end
+    end
+```
+
+**役割:**
+- **MQTTClientAdapter**: リアルタイム購読、コールバック呼び出し
+- **TelemetryProcessorService**: データ前処理（フィルタ、型変換）
+- **DataLoggerService**: セッション単位での蓄積管理
+- **SensorDataRepository**: DB 永続化ロジック
+
+---
+
+## 7.9 バックエンド内 - ML トレーニングと データ連携
+
+```mermaid
+sequenceDiagram
+    participant Frontend
+    participant Router as API Router<br>(ml/)
+    participant Service as MLPipelineService
+    participant TaskQueue as Celery Task Queue
+    participant Worker as PyTorch Worker
+    participant Repo as DatasetRepository<br>+TrainingRunRepository
+    participant DB as SQLDatabase
+    participant WS as WebSocketHub
+
+    Frontend->>Router: POST /ml/train
+    Router->>Service: launch_training(config)
+    Service->>Repo: get_dataset(session_id)
+    Repo->>DB: SELECT * FROM sensor_data
+    DB-->>Repo: telemetry rows + image paths
+    Repo-->>Service: Dataset object
+    Service->>TaskQueue: enqueue(training_job)
+    TaskQueue-->>Service: job_id
+    Service-->>Frontend: ✅ Training started
+    
+    par 非同期実行
+        loop 各エポック
+            Worker->>Worker: 学習ステップ実行
+            Worker->>Repo: update_metrics(run_id, epoch, loss, acc)
+            Repo->>DB: INSERT INTO training_metric
+            DB-->>Repo: ✅
+            Worker->>WS: emit_metric(run_id, epoch, loss)
+            WS-->>Frontend: WebSocket配信
+        end
+        Worker->>Repo: finalize_run(run_id, status=completed)
+    end
+```
+
+**役割:**
+- **MLPipelineService**: トレーニング設定、キューイング、進捗監視
+- **DatasetRepository**: 保存済みセンサデータを Dataset に変換
+- **Worker (Celery)**: GPU/CPU 上で実際の学習実行
+- **TrainingRunRepository**: メトリクス記録、ハイパーパラメータ管理
+
+---
+
+## 7.10 バックエンド内 - Chatbot 質問応答フロー
+
+```mermaid
+sequenceDiagram
+    participant Frontend
+    participant Router as API Router<br>(chatbot/)
+    participant Service as ChatbotService
+    participant VectorStore as VectorStoreAdapter<br>(Qdrant)
+    participant Repo as RAGDocumentRepository
+    participant LLMClient as LLMClientAdapter
+    participant DB as SQLDatabase
+
+    Frontend->>Router: POST /chat/query
+    Router->>Service: generate_response(query)
+    
+    Service->>VectorStore: similarity_search(query, k=5)
+    VectorStore->>DB: vector search
+    DB-->>VectorStore: top-k documents
+    VectorStore-->>Service: relevant_docs
+    
+    Service->>Repo: get_document_context(doc_ids)
+    Repo->>DB: SELECT content FROM rag_document
+    DB-->>Repo: full content
+    Repo-->>Service: context
+    
+    Service->>LLMClient: generate(prompt + context)
+    LLMClient-->>Service: streaming tokens
+    
+    par ストリーミング配信
+        loop 各トークン
+            Service->>Frontend: WebSocket配信
+            Frontend-->>Frontend: incremental表示
+        end
+    end
+```
+
+**役割:**
+- **ChatbotService**: クエリ解釈、コンテキスト構築、LLM オーケストレーション
+- **VectorStoreAdapter**: 意味的検索、Vector DB 操作
+- **RAGDocumentRepository**: 検索結果のメタデータ・内容取得
+- **LLMClientAdapter**: OpenAI/Anthropic API 呼び出し、ストリーミング管理
+
+---
+
+## 7.11 バックエンド内 - データ層 統合ビュー
+
+```mermaid
+graph TB
+    subgraph API["API/Router層"]
+        RobotRouter["robot_api/router"]
+        MLRouter["ml/router"]
+        TelemetryRouter["telemetry/router"]
+        ChatRouter["chatbot/router"]
+    end
+    
+    subgraph Service["Service層 (ビジネスロジック)"]
+        RobotService["RobotControlService"]
+        MLService["MLPipelineService"]
+        TelemetryService["TelemetryProcessorService"]
+        LoggerService["DataLoggerService"]
+        ChatService["ChatbotService"]
+    end
+    
+    subgraph Repository["Repository層 (データアクセス)"]
+        SensorRepo["SensorDataRepository"]
+        TrainingRepo["TrainingRunRepository"]
+        RAGRepo["RAGDocumentRepository"]
+    end
+    
+    subgraph Adapter["Adapter層 (外部統合)"]
+        MQTT["MQTTClientAdapter"]
+        WS["WebSocketHub"]
+        Storage["StorageClient"]
+        VectorDB["VectorStoreAdapter"]
+        LLM["LLMClientAdapter"]
+    end
+    
+    subgraph DB["Persistence"]
+        SQL["SQL Database"]
+        ObjectStorage["Image/Video Storage"]
+        Vector["Vector DB"]
+    end
+    
+    RobotRouter-->RobotService
+    MLRouter-->MLService
+    TelemetryRouter-->TelemetryService
+    TelemetryService-->LoggerService
+    ChatRouter-->ChatService
+    
+    RobotService-->MQTT
+    RobotService-->WS
+    TelemetryService-->MQTT
+    LoggerService-->SensorRepo
+    LoggerService-->Storage
+    MLService-->SensorRepo
+    MLService-->TrainingRepo
+    ChatService-->VectorDB
+    ChatService-->LLM
+    
+    SensorRepo-->SQL
+    TrainingRepo-->SQL
+    RAGRepo-->SQL
+    Storage-->ObjectStorage
+    VectorDB-->Vector
+    LLM-->LLM
+```
+
+**層の責任分離:**
+- **API層**: HTTP 受け取り、入力チェック
+- **Service層**: ビジネスロジック、複数 Repository/Adapter の調整
+- **Repository層**: SQL 操作、SQL-ORM マッピング
+- **Adapter層**: プロトコル/SDK 操作の抽象化
+- **Persistence層**: 実データ保存先
 
 ## 8. 非機能要件
 - **リアルタイム性**: 制御系は <100ms 以内の往復を目標。
