@@ -15,31 +15,6 @@ sequenceDiagram
 
   backend ->> mqtt_broker: broker接続確立
   robot ->> mqtt_broker: broker接続確立
-  Note right of backend: 以降backend<->robot間で、MQTT通信を実施<br>各トピックごとのやり取りは、「トピック別シーケンス図」を参照
-```
-
-## トピック別シーケンス図
-
-以降で、トピック別のシーケンス図を示します。
-
-なお、各セクションのセクション名は
-- トピック名【トピックの用途】
-
-の形式で記載しています。
-
-<br>
-
-なお、各トピックの「<AMR_ID>」は **各AMRに割り当てられたID** に置き換えて読んでください
-
-### /amr/<AMR_ID>/velocity　【速度制御】
-
-指定した速度情報（並進、回転）に基づき、AMRを移動させます。
-```mermaid
-sequenceDiagram
-  participant backend
-  participant mqtt_broker
-  participant robot as robot (real or sim)
-
   loop
     alt　速度指令受信時
       backend ->> mqtt_broker: AMR速度（並進速度、回転速度）<br>トピック名：/amr/<AMR_ID>/velocity
@@ -47,19 +22,7 @@ sequenceDiagram
       robot ->> robot: 速度情報に従って、AMRが移動
     end
   end
-```
 
-### /amr/<AMR_ID>/status　【AMR現在状態取得】
-
-AMRの現在状態（位置、姿勢など）を定周期で取得します。
-
-```mermaid
-sequenceDiagram
-  participant backend
-  participant mqtt_broker
-  participant robot as robot (real or sim)
-
-  
   par
     loop 定周期
       robot ->> robot: 現在位置を取得
@@ -67,9 +30,60 @@ sequenceDiagram
       mqtt_broker ->> backend: AMR状態（位置、姿勢など）<br>トピック名：/amr/<AMR_ID>/status
     end
   end
+```
 
+## トピック仕様
 
+```
+<AMR_ID> は各AMRを識別するためのユニークなIDに置き換えてください。
+```
 
+| No | 概要 | トピック名 | 方向 | QOS | レテンション | 備考 |
+|----|------|------------|------|-----|--------------|------|
+| 1 | [AMR速度指令](#amr速度指令) | /amr/<AMR_ID>/velocity | Backend → Robot | 1 | なし | 並進速度、回転速度を指定 |
+| 2 | [AMR状態情報](#amr状態) | /amr/<AMR_ID>/status | Robot → Backend | 1 | なし | 位置、姿勢、バッテリ状態など |
+
+### 各トピック詳細
+
+#### AMR速度指令
+
+AMRはこのトピックを購読し、受信した速度指令に従って走行します。
+
+- **トピック名**: /amr/<AMR_ID>/velocity
+- **方向**: Backend → Robot
+- **QOS**: 1
+- **レテンション**: なし
+
+Payload
+
+```json
+{
+  "linear": float,  // 並進速度 (m/s)
+  "angular": float  // 回転速度 (rad/s)
+}
+```
+
+#### [AMR状態](#amr状態)
+
+AMRの現在の状態情報を送信します。  
+Backendはこのトピックを購読し、AMRの位置やバッテリ状態を把握します。
+
+- **トピック名**: /amr/<AMR_ID>/status
+- **方向**: Robot → Backend
+- **QOS**: 1
+- **レテンション**: なし
+
+Payload
+
+```json
+{
+  "position": {
+    "x": float,      // X座標 (m)
+    "y": float,      // Y座標 (m)
+    "theta": float   // 姿勢角 (rad)
+  },
+  "timestamp": int       // Unixタイムスタンプ (ms)
+}
 ```
 
 以下、copilot生成による仮の設計書
@@ -78,9 +92,10 @@ sequenceDiagram
 - [robot-ml-web-app](#robot-ml-web-app)
 - [シーケンス図](#シーケンス図)
   - [初期接続](#初期接続)
-  - [トピック別シーケンス図](#トピック別シーケンス図)
-    - [/amr/\<AMR\_ID\>/velocity　【速度制御】](#amramr_idvelocity速度制御)
-    - [/amr/\<AMR\_ID\>/status　【AMR現在状態取得】](#amramr_idstatusamr現在状態取得)
+  - [トピック仕様](#トピック仕様)
+    - [各トピック詳細](#各トピック詳細)
+      - [AMR速度指令](#amr速度指令)
+      - [AMR状態](#amr状態)
   - [目次](#目次)
   - [1. ゴールとスコープ](#1-ゴールとスコープ)
   - [2. ユースケース概要](#2-ユースケース概要)
