@@ -7,18 +7,18 @@
 
 backend <-> robot間の初期接続時の流れを示します。
 
+```
+「backend <-> robot間」はMQTT brokerを介してMQTT通信を行いますが、以下シーケンス図では、brokerを省略しています。
+```
+
 ```mermaid
 sequenceDiagram
   participant backend
-  participant mqtt_broker
   participant robot as robot (real or sim)
 
-  backend ->> mqtt_broker: broker接続確立
-  robot ->> mqtt_broker: broker接続確立
   loop
     alt　速度指令受信時
-      backend ->> mqtt_broker: AMR速度（並進速度、回転速度）<br>トピック名：/amr/<AMR_ID>/velocity
-      mqtt_broker ->> robot: AMR速度（並進速度、回転速度）<br>トピック名：/amr/<AMR_ID>/velocity
+      backend ->> robot: AMR速度（並進速度、回転速度）<br>トピック名：/amr/<AMR_ID>/velocity
       robot ->> robot: 速度情報に従って、AMRが移動
     end
   end
@@ -26,8 +26,7 @@ sequenceDiagram
   par
     loop 定周期
       robot ->> robot: 現在位置を取得
-      robot ->> mqtt_broker: AMR状態（位置、姿勢など）<br>トピック名：/amr/<AMR_ID>/status
-      mqtt_broker ->> backend: AMR状態（位置、姿勢など）<br>トピック名：/amr/<AMR_ID>/status
+      robot ->> backend: AMR状態（位置、姿勢など）<br>トピック名：/amr/<AMR_ID>/status
     end
   end
 ```
