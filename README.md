@@ -40,8 +40,8 @@ sequenceDiagram
 
 | No | 概要 | トピック名 | 方向 | QOS | レテンション | 備考 |
 |----|------|------------|------|-----|--------------|------|
-| 1 | [AMR速度指令](#amr速度指令) | /amr/<AMR_ID>/velocity | Backend → Robot | 1 | なし | 並進速度、回転速度を指定 |
-| 2 | [AMR状態情報](#amr状態) | /amr/<AMR_ID>/status | Robot → Backend | 1 | なし | 位置、姿勢、バッテリ状態など |
+| 1 | [AMR速度指令](#amr速度指令) | /amr/<AMR_ID>/velocity | Backend → Robot | 1 | なし | - |
+| 2 | [AMR状態情報](#amr状態) | /amr/<AMR_ID>/status | Robot → Backend | 1 | なし | - |
 
 ### 各トピック詳細
 
@@ -58,8 +58,8 @@ Payload
 
 ```json
 {
-  "linear": float,  // 並進速度 (m/s)
-  "angular": float  // 回転速度 (rad/s)
+  "linear": 1.0,   // 並進速度 (m/s)
+  "angular": 0.5   // 回転速度 (rad/s)
 }
 ```
 
@@ -78,11 +78,11 @@ Payload
 ```json
 {
   "position": {
-    "x": float,      // X座標 (m)
-    "y": float,      // Y座標 (m)
-    "theta": float   // 姿勢角 (rad)
+    "x": 0.0,      // X座標 (m)
+    "y": 0.0,      // Y座標 (m)
+    "theta": 0.0   // 姿勢角 (rad)
   },
-  "timestamp": int       // Unixタイムスタンプ (ms)
+  "timestamp": 0       // Unixタイムスタンプ (ms)
 }
 ```
 
