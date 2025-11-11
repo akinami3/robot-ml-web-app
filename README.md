@@ -114,7 +114,9 @@ Payload
     - [4.3 状態管理と通信レイヤ](#43-状態管理と通信レイヤ)
   - [5. バックエンド設計](#5-バックエンド設計)
     - [5.1 アプリケーションレイヤ構成](#51-アプリケーションレイヤ構成)
+    - [5.1.1 Robot API の条件付きデータ保存パターン](#511-robot-api-の条件付きデータ保存パターン)
     - [5.2 クラス図](#52-クラス図)
+    - [5.2 クラス図](#52-クラス図-1)
     - [5.3 API 一覧](#53-api-一覧)
   - [6. データ管理](#6-データ管理)
     - [6.1 データベーススキーマ](#61-データベーススキーマ)
@@ -127,11 +129,12 @@ Payload
     - [7.4 ナビゲーション指示](#74-ナビゲーション指示)
     - [7.5 機械学習トレーニング](#75-機械学習トレーニング)
     - [7.6 Chatbot (RAG 質問応答)](#76-chatbot-rag-質問応答)
-  - [7.7 バックエンド内 - Robot API 変換フロー](#77-バックエンド内---robot-api-変換フロー)
+  - [7.7 バックエンド内 - Robot API 変換フロー（条件付きデータ保存）](#77-バックエンド内---robot-api-変換フロー条件付きデータ保存)
   - [7.8 バックエンド内 - センサデータ取得・保存フロー](#78-バックエンド内---センサデータ取得保存フロー)
   - [7.9 バックエンド内 - ML トレーニングと データ連携](#79-バックエンド内---ml-トレーニングと-データ連携)
   - [7.10 バックエンド内 - Chatbot 質問応答フロー](#710-バックエンド内---chatbot-質問応答フロー)
   - [7.11 バックエンド内 - データ層 統合ビュー](#711-バックエンド内---データ層-統合ビュー)
+  - [7.12 データフロー: robot\_api と datalogger の連携](#712-データフロー-robot_api-と-datalogger-の連携)
   - [8. 非機能要件](#8-非機能要件)
   - [9. セキュリティと監視](#9-セキュリティと監視)
   - [10. 将来的な拡張ポイント](#10-将来的な拡張ポイント)
@@ -578,6 +581,102 @@ frontend/
 
 ## 5. バックエンド設計
 ### 5.1 アプリケーションレイヤ構成
+
+*詳細なディレクトリ構成は [0.3 バックエンド詳細](#03-バックエンド詳細) を参照*
+
+```
+backend/app/
+  main.py
+  core/                          # 共有設定・ロギング
+    config.py
+    logging.py
+    dependencies.py
+  
+  # === 役割ごとのモジュール ===
+  api/
+    router.py                    # 統一エントリポイント
+    
+    robot_api/                   # 1️⃣ Frontend→Robot API変換
+      router.py
+      schemas.py
+    
+    ml/                          # 2️⃣ 機械学習
+      router.py
+      schemas.py
+    
+    telemetry/                   # 3️⃣ センサデータ→SQL保存
+      router.py
+      schemas.py
+    
+    chatbot/                     # 4️⃣ Chatbot
+      router.py
+      schemas.py
+  
+  services/                      # ビジネスロジック（分ける）
+    robot_control.py             # Robot API変換ロジック
+    ml_pipeline.py               # ML実行・進捗管理
+    telemetry_processor.py       # センサデータ処理・永続化
+    chatbot_engine.py            # Chatbot質問応答
+    
+  repositories/                  # データアクセス層（共有）
+    robot_state.py
+    sensor_data.py
+    training_runs.py
+    rag_documents.py
+  
+  adapters/                      # 外部連携（共有）
+    mqtt_client.py               # MQTT接続
+    websocket_manager.py         # WebSocket
+    storage_client.py            # 画像保存
+    vector_store.py              # Vector DB
+    llm_client.py                # LLM API
+  
+  workers/                       # 非同期ジョブ（共有）
+    tasks.py                     # Celery/RQ タスク
+  
+  models/                        # SQLAlchemy ORM（共有）
+    __init__.py
+    robot_state.py
+    sensor_data.py
+    training_run.py
+    rag_document.py
+```
+
+### 5.1.1 Robot API の条件付きデータ保存パターン
+
+**基本設計:** robot_api は 単なる「通信ブリッジ」ですが、**セッション記録中は同時にデータを保存** します
+
+```
+┌─────────────────────────────────────────────┐
+│ Robot API（robot_control/router.py）        │
+│                                             │
+│  POST /robot/velocity                       │
+│    ├─ [常に実行] MQTTへ速度指令を送信       │
+│    │   └─ MQTT: /amr/<ID>/velocity         │
+│    │                                        │
+│    └─ [条件付き] セッション記録中？         │
+│        ├─ YES: 受信データをSensorDataに保存│
+│        │   └─ Repository.create(telemetry)│
+│        └─ NO: 単にブリッジ（保存しない）   │
+│                                             │
+│  POST /robot/velocity (受信側)              │
+│    ├─ [常に実行] 受信データをWS配信         │
+│    │   └─ WebSocket: status update        │
+│    │                                        │
+│    └─ [条件付き] セッション記録中？         │
+│        ├─ YES: 受信データをSensorDataに保存│
+│        │   └─ Repository.create(telemetry)│
+│        └─ NO: 単にブリッジ（保存しない）   │
+└─────────────────────────────────────────────┘
+```
+
+**セッション状態の管理:**
+- `DataLoggerService` が「現在アクティブなセッションID」を管理
+- `RobotControlService` が `DataLoggerService` をチェック
+- セッション記録中 → `SensorDataRepository` へ保存
+- セッション未開始/終了後 → 保存せず、単にMQTT/WS転送のみ
+
+### 5.2 クラス図
 ```
 backend/
   app/
@@ -626,9 +725,16 @@ backend/
 ```mermaid
 classDiagram
     class RobotControlService {
+        -datalogger_service: DataLoggerService
+        -mqtt_adapter: MQTTClientAdapter
+        -ws_hub: WebSocketHub
+        -sensor_repo: SensorDataRepository
+        ---
         +set_velocity(cmd: VelocityCommand)
+        +handle_robot_status(status: RobotStatus)
         +send_navigation(goal: NavGoal)
         +toggle_simulation(mode: SimulationMode)
+        #_save_if_logging(data: dict)
     }
 
     class TelemetryService {
@@ -638,11 +744,15 @@ classDiagram
     }
 
     class DataLoggerService {
-        +start_session(config)
+        -active_session_id: UUID?
+        -session_repo: DatasetSessionRepository
+        ---
+        +start_session(config): UUID
         +pause_session(id)
         +resume_session(id)
         +save_session(id, options)
         +discard_session(id)
+        +get_active_session_id(): UUID?
         +export_image(path, metadata)
     }
 
@@ -912,13 +1022,15 @@ sequenceDiagram
     UI-->>User: レスポンス表示 + 参照リンク
 ```
 
-## 7.7 バックエンド内 - Robot API 変換フロー
+## 7.7 バックエンド内 - Robot API 変換フロー（条件付きデータ保存）
 
 ```mermaid
 sequenceDiagram
     participant Frontend
     participant Router as API Router<br>(robot_api/)
     participant Service as RobotControlService
+    participant Logger as DataLoggerService
+    participant Repo as SensorDataRepository
     participant Adapter as MQTTClientAdapter
     participant WS as WebSocketHub
     participant Robot
@@ -926,18 +1038,49 @@ sequenceDiagram
     Frontend->>Router: POST /robot/velocity
     Router->>Router: バリデーション
     Router->>Service: set_velocity(VelocityCommand)
-    Service->>Adapter: publish(/amr/*/velocity)
-    Adapter->>Robot: MQTT送信
-    Robot-->>Adapter: /amr/*/status応答
-    Adapter-->>Service: telemetry callback
-    Service->>WS: broadcast(robot_state)
-    WS-->>Frontend: WebSocket更新
+    
+    par MQTT送信（常に実行）
+        Service->>Adapter: publish(/amr/*/velocity)
+        Adapter->>Robot: MQTT送信
+    and 条件付きデータ保存
+        Service->>Logger: get_active_session_id()
+        alt セッション記録中
+            Logger-->>Service: session_id
+            Service->>Repo: create(session_id, cmd_data)
+            Repo->>Repo: INSERT INTO sensor_data
+        else セッション未開始
+            Logger-->>Service: None
+            Service-->>Service: スキップ
+        end
+    end
+    
+    par ロボット受信
+        Robot-->>Adapter: /amr/*/status応答
+        Adapter-->>Service: telemetry callback
+    end
+    
+    par ステータス配信（常に実行）
+        Service->>WS: broadcast(robot_state)
+        WS-->>Frontend: WebSocket更新
+    and 条件付きデータ保存
+        Service->>Logger: get_active_session_id()
+        alt セッション記録中
+            Logger-->>Service: session_id
+            Service->>Repo: create(session_id, status_data)
+            Repo->>Repo: INSERT INTO sensor_data
+        else セッション未開始
+            Logger-->>Service: None
+            Service-->>Service: スキップ
+        end
+    end
 ```
 
 **役割:**
 - **Router**: HTTP リクエスト受け取り、スキーマチェック
-- **Service**: ビジネスロジック（速度制限、割り込み判定など）
-- **Adapter**: MQTT プロトコル操作、再接続管理
+- **Service**: ビジネスロジック＋条件付きデータ保存判定
+- **DataLoggerService**: 現在のセッション状態を提供
+- **SensorDataRepository**: コマンド・ステータスデータを DB に保存
+- **Adapter**: MQTT プロトコル操作
 
 ---
 
@@ -1132,6 +1275,87 @@ graph TB
 - **Repository層**: SQL 操作、SQL-ORM マッピング
 - **Adapter層**: プロトコル/SDK 操作の抽象化
 - **Persistence層**: 実データ保存先
+
+---
+
+## 7.12 データフロー: robot_api と datalogger の連携
+
+**基本フロー:**
+
+```
+セッション未開始時
+├─ Frontend: POST /robot/velocity
+│  └─ Backend: 単なるMQTTブリッジ（保存しない）
+└─ ロボットステータスは WS でのみ配信
+
+セッション開始時（保存ボタン: ON）
+├─ Frontend: POST /datalogger/session/start
+│  └─ DataLoggerService: active_session_id = UUID
+├─ Frontend: POST /robot/velocity
+│  └─ Backend:
+│     ├─ MQTTへ速度指令を送信
+│     └─ ✅ SensorData に保存
+└─ ロボットステータス受信時
+   ├─ WS でステータス配信
+   └─ ✅ SensorData に保存
+
+セッション終了時（保存ボタン: OFF）
+├─ Frontend: POST /datalogger/session/{id}/save
+│  └─ DataLoggerService: active_session_id = None
+├─ Frontend: POST /robot/velocity
+│  └─ Backend: 単なるMQTTブリッジ（保存しない）
+└─ ロボットステータスは WS でのみ配信
+```
+
+**実装時のポイント:**
+
+| 処理 | 常時実行 | 条件付き（セッション記録中） |
+|------|--------|--------------------------|
+| **コマンド送信（POST /robot/velocity）** | ✅ MQTT送信 | ✅ SensorData.create() |
+| **ステータス受信（MQTT /amr/*/status）** | ✅ WS配信 | ✅ SensorData.create() |
+| **画像保存** | ✅ (撮影時) | ✅ ObjectStorage + メタデータ |
+
+**Service層での実装パターン:**
+
+```python
+# RobotControlService の例
+class RobotControlService:
+    def __init__(self, 
+                 mqtt_adapter, 
+                 ws_hub, 
+                 datalogger_service,
+                 sensor_repo):
+        self.mqtt = mqtt_adapter
+        self.ws = ws_hub
+        self.datalogger = datalogger_service
+        self.sensor_repo = sensor_repo
+    
+    async def set_velocity(self, cmd: VelocityCommand):
+        # [常に実行] MQTT送信
+        await self.mqtt.publish("/amr/robot1/velocity", cmd.dict())
+        
+        # [条件付き] セッション記録中なら保存
+        session_id = self.datalogger.get_active_session_id()
+        if session_id:
+            await self.sensor_repo.create(
+                session_id=session_id,
+                data_type="command",
+                payload=cmd.dict()
+            )
+    
+    async def handle_robot_status(self, status: RobotStatus):
+        # [常に実行] WebSocket配信
+        await self.ws.broadcast("/ws/robot", status.dict())
+        
+        # [条件付き] セッション記録中なら保存
+        session_id = self.datalogger.get_active_session_id()
+        if session_id:
+            await self.sensor_repo.create(
+                session_id=session_id,
+                data_type="status",
+                payload=status.dict()
+            )
+```
 
 ## 8. 非機能要件
 - **リアルタイム性**: 制御系は <100ms 以内の往復を目標。
