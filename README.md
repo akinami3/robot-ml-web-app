@@ -13,7 +13,7 @@ backend <-> robot間の初期接続時の流れを示します。
 sequenceDiagram
   actor user as user
   participant frontend
-  participant backend
+  participant backend as AMR_API_Bridge<br>(backend)
   participant robot as robot (real or sim)
 
   alt　速度指令受信時
