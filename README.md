@@ -43,7 +43,7 @@ sequenceDiagram
 | No | 概要 | トピック名 | 方向 | QOS | レテンション | 備考 |
 |----|------|------------|------|-----|--------------|------|
 | 1 | [AMR速度指令](#amr速度指令) | /amr/<AMR_ID>/velocity | Backend → Robot | 1 | なし | - |
-| 2 | [AMR状態情報](#amr状態) | /amr/<AMR_ID>/status | Robot → Backend | 1 | なし | - |
+| 2 | [AMR状態](#amr状態) | /amr/<AMR_ID>/status | Robot → Backend | 1 | なし | - |
 
 ### 各トピック詳細
 
@@ -53,7 +53,7 @@ sequenceDiagram
 
 #### AMR速度指令
 
-AMRはこのトピックを購読し、受信した速度指令に従って走行します。
+AMRに対する速度指令を送信します。
 
 - **トピック名**: /amr/<AMR_ID>/velocity
 - **方向**: Backend → Robot
@@ -71,8 +71,7 @@ Payload
 
 #### AMR状態
 
-AMRの現在の状態情報を送信します。  
-Backendはこのトピックを購読し、AMRの位置やバッテリ状態を把握します。
+AMRの現在の状態を送信します。  
 
 - **トピック名**: /amr/<AMR_ID>/status
 - **方向**: Robot → Backend
