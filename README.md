@@ -3,8 +3,6 @@
 
 # シーケンス図
 
-## 初期接続
-
 backend <-> robot間の初期接続時の流れを示します。
 
 ```
@@ -13,14 +11,14 @@ backend <-> robot間の初期接続時の流れを示します。
 
 ```mermaid
 sequenceDiagram
+  actor user as user
+  participant frontend
   participant backend
   participant robot as robot (real or sim)
 
-  loop
-    alt　速度指令受信時
-      backend ->> robot: AMR速度（並進速度、回転速度）<br>トピック名：/amr/<AMR_ID>/velocity
-      robot ->> robot: 速度情報に従って、AMRが移動
-    end
+  alt　速度指令受信時
+    backend ->> robot: AMR速度（並進速度、回転速度）<br>トピック名：/amr/<AMR_ID>/velocity
+    robot ->> robot: 速度情報に従って、AMRが移動
   end
 
   par
@@ -95,7 +93,6 @@ Payload
 ## 目次
 - [robot-ml-web-app](#robot-ml-web-app)
 - [シーケンス図](#シーケンス図)
-  - [初期接続](#初期接続)
   - [トピック仕様](#トピック仕様)
     - [トピック一覧](#トピック一覧)
     - [各トピック詳細](#各トピック詳細)
