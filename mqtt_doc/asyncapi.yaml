@@ -1,0 +1,62 @@
+asyncapi: 2.6.0
+info:
+  title: MQTT API
+  version: 1.0.0
+servers:
+  production:
+    url: mqtt.example.com:1883
+    protocol: mqtt
+channels:
+  sensors/temperature:
+    description: "\u6E29\u5EA6\u30BB\u30F3\u30B5\u30FC\u304B\u3089\u9001\u4FE1\u3055\
+      \u308C\u308B\u30C7\u30FC\u30BF"
+    subscribe:
+      message:
+        name: TemperaturePayload
+        payload:
+          properties:
+            value:
+              description: "\u6E29\u5EA6\u5024"
+              example: 22.5
+              title: Value
+              type: number
+            timestamp:
+              description: "\u6E2C\u5B9A\u6642\u523B\uFF08ISO8601\uFF09"
+              example: '2025-11-10T12:00:00Z'
+              title: Timestamp
+              type: string
+          required:
+          - value
+          - timestamp
+          title: TemperaturePayload
+          type: object
+        bindings:
+          mqtt:
+            qos: 1
+            retain: false
+  alerts/system:
+    description: "\u30B7\u30B9\u30C6\u30E0\u30A2\u30E9\u30FC\u30C8\u60C5\u5831"
+    subscribe:
+      message:
+        name: AlertPayload
+        payload:
+          properties:
+            level:
+              description: "\u30A2\u30E9\u30FC\u30C8\u30EC\u30D9\u30EB"
+              example: critical
+              title: Level
+              type: string
+            message:
+              description: "\u30A2\u30E9\u30FC\u30C8\u5185\u5BB9"
+              example: System overload
+              title: Message
+              type: string
+          required:
+          - level
+          - message
+          title: AlertPayload
+          type: object
+        bindings:
+          mqtt:
+            qos: 2
+            retain: true
