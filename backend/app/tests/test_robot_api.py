@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.schemas.robot import NavigationGoal, VelocityCommand
+from app.features.robot.schemas import NavigationGoal, VelocityCommand
 
 
 @pytest.mark.asyncio

@@ -13,12 +13,13 @@ from app.api.router import api_router
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.database.session import get_session_factory
-from app.repositories.dataset_sessions import DatasetSessionRepository
-from app.repositories.sensor_data import SensorDataRepository
-from app.services.datalogger import DataLoggerService
-from app.services.telemetry_processor import TelemetryProcessorService
-from app.websocket.handlers import router as websocket_router
-from app.websocket.manager import WebSocketHub
+from app.features.telemetry.dependencies import (
+    create_datalogger_service,
+    create_telemetry_processor_service,
+)
+from app.infrastructure.messaging import TELEMETRY_SUBSCRIPTION_PATTERN
+from app.infrastructure.realtime import WebSocketHub
+from app.infrastructure.realtime.handlers import router as websocket_router
 from app.workers.celery_app import get_celery_app
 
 
@@ -46,15 +47,10 @@ async def lifespan(app: FastAPI):
 		robot_id = parts[1] if len(parts) > 1 else "unknown"
 		sensor_type = parts[-1]
 		async with session_factory() as session:
-			datalogger = DataLoggerService(
-				session=session,
-				dataset_repo=DatasetSessionRepository(session),
-				sensor_repo=SensorDataRepository(session),
-			)
-			telemetry_service = TelemetryProcessorService(
+			datalogger = create_datalogger_service(session)
+			telemetry_service = create_telemetry_processor_service(
 				session=session,
 				datalogger=datalogger,
-				sensor_repo=SensorDataRepository(session),
 				websocket_hub=websocket_hub,
 			)
 			await telemetry_service.handle_mqtt_message(
@@ -63,7 +59,7 @@ async def lifespan(app: FastAPI):
 				payload=payload,
 			)
 
-	await mqtt_adapter.subscribe_with_callback("/amr/+/telemetry/#", telemetry_callback)
+	await mqtt_adapter.subscribe_with_callback(TELEMETRY_SUBSCRIPTION_PATTERN, telemetry_callback)
 
 	try:
 		yield

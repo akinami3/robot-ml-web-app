@@ -29,63 +29,96 @@ sequenceDiagram
   end
 ```
 
-## トピック仕様
-
 ```
-<AMR_ID> は各AMRを識別するためのユニークなIDに置き換えてください。
-```
+    core/
+        base_dependencies.py       # 共通依存性 (DB, state, adapters)
+        dependencies.py            # Feature 依存性の集約
 
-### トピック一覧
+    features/
+        robot/
+            router.py                # HTTP/WS インタフェース
+            service.py               # RobotControlService
+            dependencies.py          # get_robot_control_service
+            schemas.py
+        telemetry/
+            router.py
+            service.py               # DataLoggerService / TelemetryProcessorService
+            dependencies.py          # get_datalogger_service 等
+            schemas.py
+        ml/
+            router.py
+            service.py               # MLPipelineService
+            dependencies.py          # get_ml_pipeline_service
+            schemas.py
+        chat/
+            router.py
+            service.py               # ChatbotService
+            dependencies.py          # get_chatbot_service
+            schemas.py
 
-| No | 概要 | トピック名 | 方向 | QOS | レテンション | 備考 |
-|----|------|------------|------|-----|--------------|------|
-| 1 | [AMR速度指令](#amr速度指令) | /amr/<AMR_ID>/velocity | Backend → Robot | 1 | なし | - |
-| 2 | [AMR状態](#amr状態) | /amr/<AMR_ID>/status | Robot → Backend | 1 | なし | - |
+    repositories/
+        robot_state.py
+        sensor_data.py
+        ```
+            api/
+                router.py                  # 統一エントリポイント（feature ルータ集約）
 
-### 各トピック詳細
+            features/
+                robot/
+                    router.py
+                    service.py
+                    dependencies.py
+                    schemas.py
+                telemetry/
+                    router.py
+                    service.py
+                    dependencies.py
+                    schemas.py
+                ml/
+                    router.py
+                    service.py
+                    dependencies.py
+                    schemas.py
+                chat/
+                    router.py
+                    service.py
+                    dependencies.py
+                    schemas.py
 
-```
-各payloadは説明用にJSONC形式（コメント付きJSON）で記述していますが、実際の実装では、JSON形式で記述する必要があることに注意してください。
-```
+            core/
+                base_dependencies.py       # DB・MQTT・WS など共通依存性
+                dependencies.py            # FastAPI DI エントリ
 
-#### AMR速度指令
+            repositories/                # データアクセス層（共有）
+                robot_state.py
+                sensor_data.py
+                training_runs.py
+                rag_documents.py
 
-AMRに対する速度指令を送信します。
+            adapters/                    # 外部連携（共有）
+                mqtt_client.py             # MQTT接続
+                storage_client.py          # 画像保存
+                vector_store.py            # Vector DB
+                llm_client.py              # LLM API
 
-- **トピック名**: /amr/<AMR_ID>/velocity
-- **方向**: Backend → Robot
-- **QOS**: 1
-- **レテンション**: なし
+            infrastructure/
+                messaging/
+                    topics.py              # MQTTトピック定義
+                realtime/
+                    __init__.py            # Hub/チャンネルのエクスポート
+                    handlers.py            # WebSocketルータ
+                    manager.py             # WebSocket Hub
+                    subscriptions.py       # チャンネル名定義
 
-Payload
+            workers/
+                tasks.py                   # Celery/RQ タスク
 
-```json
-{
-  "linear": 1.0,   // 並進速度 (m/s)
-  "angular": 0.5   // 回転速度 (rad/s)
-}
-```
-
-#### AMR状態
-
-AMRの現在の状態を送信します。  
-
-- **トピック名**: /amr/<AMR_ID>/status
-- **方向**: Robot → Backend
-- **QOS**: 1
-- **レテンション**: なし
-
-Payload
-
-```json
-{
-  "position": {
-    "x": 0.0,      // X座標 (m)
-    "y": 0.0,      // Y座標 (m)
-    "theta": 0.0   // 姿勢角 (rad)
-  },
-  "timestamp": 0       // Unixタイムスタンプ (ms)
-}
+            models/                      # SQLAlchemy ORM
+                robot_state.py
+                sensor_data.py
+                training_run.py
+                rag_document.py
+        ```
 ```
 
 以下、copilot生成による仮の設計書
@@ -93,11 +126,6 @@ Payload
 ## 目次
 - [robot-ml-web-app](#robot-ml-web-app)
 - [シーケンス図](#シーケンス図)
-  - [トピック仕様](#トピック仕様)
-    - [トピック一覧](#トピック一覧)
-    - [各トピック詳細](#各トピック詳細)
-      - [AMR速度指令](#amr速度指令)
-      - [AMR状態](#amr状態)
   - [目次](#目次)
   - [1. ゴールとスコープ](#1-ゴールとスコープ)
   - [2. ユースケース概要](#2-ユースケース概要)
@@ -317,7 +345,7 @@ flowchart LR
 
 #### **1️⃣ Robot API - Frontend → Robot 通信変換**
 - **責務**: HTTP リクエストを MQTT コマンドに変換し、ロボットに送信
-- **ファイル**: `api/robot_api/`, `services/robot_control.py`
+- **ファイル**: `features/robot/`
 - **機能**:
   - POST `/robot/velocity` → MQTT `/amr/<ID>/velocity`
   - POST `/robot/navigation` → MQTT `/amr/<ID>/navigation`
@@ -326,7 +354,7 @@ flowchart LR
 
 #### **2️⃣ Telemetry - センサデータ取得・保存**
 - **責務**: MQTT から定周期で受信するロボット状態をキャッチし、DB に保存
-- **ファイル**: `api/telemetry/`, `services/telemetry_processor.py`, `datalogger.py`
+- **ファイル**: `features/telemetry/`
 - **機能**:
   - MQTT `/amr/<ID>/status` をリスニング
   - JSON パースと前処理
@@ -335,7 +363,7 @@ flowchart LR
 
 #### **3️⃣ ML Pipeline - 機械学習実行**
 - **責務**: 保存されたセンサデータを使用して学習を実行
-- **ファイル**: `api/ml/`, `services/ml_pipeline.py`
+- **ファイル**: `features/ml/`
 - **機能**:
   - Dataset を SensorDataRepository から取得
   - PyTorch 学習を Celery で非同期実行
@@ -344,7 +372,7 @@ flowchart LR
 
 #### **4️⃣ Chatbot - RAG + LLM 質問応答**
 - **責務**: Vector DB を用いたドキュメント検索と LLM による応答生成
-- **ファイル**: `api/chatbot/`, `services/chatbot_engine.py`
+- **ファイル**: `features/chat/`
 - **機能**:
   - クエリをベクトル化し、Vector DB で類似ドキュメント検索
   - 検索結果をコンテキストとして LLM に入力
@@ -776,7 +804,7 @@ class RobotControlService:
 - **状態管理**: Redux Toolkit / Zustand + React Query
 - **リアルタイム**: `useWebSocket` カスタムフックで購読
 - **フォーム管理**: React Hook Form
-- **タブの独立性**: 各タブは `modules/<tab>/` 配下で自己完結
+- **タブの独立性**: 各タブは `features/<tab>/` 配下で自己完結
 
 ## 6. データ管理
 
@@ -1295,58 +1323,22 @@ frontend/src/
 │       ├── telemetryApi.ts
 │       └── chatbotApi.ts
 │
-├── modules/                        # タブ毎の独立モジュール
-│   │
-│   ├── robot-control/
+├── features/                      # UI・状態・型を内包した機能レイヤ
+│   ├── robotControl/
 │   │   ├── components/
-│   │   │   ├── JoystickPanel.tsx
-│   │   │   ├── RobotStatus.tsx
-│   │   │   ├── VideoStream.tsx
-│   │   │   ├── NavigationMap.tsx
-│   │   │   └── SimulationToggle.tsx
-│   │   ├── hooks/
-│   │   │   └── useRobotControl.ts
-│   │   ├── services/
-│   │   │   └── robotService.ts
-│   │   └── index.tsx               # タブのエントリポイント
-│   │
-│   ├── database/
-│   │   ├── components/
-│   │   │   ├── DataLoggerControl.tsx
-│   │   │   ├── SessionList.tsx
-│   │   │   ├── DataPreview.tsx
-│   │   │   └── SessionStatus.tsx
-│   │   ├── hooks/
-│   │   │   └── useDataLogger.ts
-│   │   ├── services/
-│   │   │   └── dataloggerService.ts
-│   │   └── index.tsx
-│   │
+│   │   │   └── RobotControlPanel.tsx
+│   │   ├── model/
+│   │   │   └── robotStore.ts
+│   │   └── types.ts
+│   ├── datasets/
+│   │   └── components/
+│   │       └── DatasetBrowser.tsx
 │   ├── ml/
-│   │   ├── components/
-│   │   │   ├── TrainingControl.tsx
-│   │   │   ├── HyperparameterForm.tsx
-│   │   │   ├── MetricsChart.tsx
-│   │   │   ├── TrainingHistory.tsx
-│   │   │   └── ModelComparison.tsx
-│   │   ├── hooks/
-│   │   │   └── useMLTraining.ts
-│   │   ├── services/
-│   │   │   └── mlService.ts
-│   │   └── index.tsx
-│   │
-│   └── chatbot/
-│       ├── components/
-│       │   ├── ChatWindow.tsx
-│       │   ├── MessageList.tsx
-│       │   ├── QueryInput.tsx
-│       │   ├── DocumentPreview.tsx
-│       │   └── ChatHistory.tsx
-│       ├── hooks/
-│       │   └── useChatbot.ts
-│       ├── services/
-│       │   └── chatbotService.ts
-│       └── index.tsx
+│   │   └── components/
+│   │       └── MLDashboard.tsx
+│   └── chat/
+│       └── components/
+│           └── ChatConsole.tsx
 │
 ├── shared/
 │   ├── components/
@@ -1371,7 +1363,6 @@ frontend/src/
 │   │   ├── constants.ts            # 定数
 │   │   └── logger.ts               # クライアント側ログ
 │   ├── types/
-│   │   ├── robot.ts                # ロボット制御型定義
 │   │   ├── telemetry.ts            # センサデータ型定義
 │   │   ├── ml.ts                   # ML型定義
 │   │   ├── chat.ts                 # チャット型定義
@@ -1380,6 +1371,8 @@ frontend/src/
 │       ├── globals.css
 │       └── theme.css
 │
+├── styles/
+│   └── global.css など
 ├── index.tsx                       # エントリポイント
 └── vite-env.d.ts
 ```
@@ -1393,62 +1386,49 @@ backend/app/
 │   ├── __init__.py
 │   ├── config.py                   # 環境変数、設定管理
 │   ├── logging.py                  # ロギング設定
-│   ├── dependencies.py             # 依存性注入
+│   ├── base_dependencies.py        # 共通インフラ依存性（DB, state アダプタ）
+│   ├── dependencies.py             # Feature 依存性を集約
 │   ├── exceptions.py               # カスタム例外
 │   └── security.py                 # JWT, OAuth2 設定
 │
 ├── api/
 │   ├── __init__.py
-│   ├── router.py                   # API 統一ルーター
-│   │
-│   ├── robot_api/                  # 1️⃣ Robot API 変換
-│   │   ├── __init__.py
-│   │   ├── router.py               # POST /robot/velocity, /navigation
-│   │   ├── schemas.py              # VelocityCommand, NavigationGoal
-│   │   └── models.py               # (オプション) ローカルモデル
-│   │
-│   ├── telemetry/                  # 3️⃣ センサデータ取得・保存
-│   │   ├── __init__.py
-│   │   ├── router.py               # POST /datalogger/session, GET /sessions
-│   │   ├── schemas.py              # TelemetryLog, SessionConfig
-│   │   └── models.py
-│   │
-│   ├── ml/                         # 2️⃣ 機械学習
-│   │   ├── __init__.py
-│   │   ├── router.py               # POST /ml/train, GET /ml/runs/{id}
-│   │   ├── schemas.py              # TrainingConfig, MetricSnapshot
-│   │   └── models.py
-│   │
-│   └── chatbot/                    # 4️⃣ Chatbot
-│       ├── __init__.py
-│       ├── router.py               # POST /chat/query, GET /chat/history
-│       ├── schemas.py              # QueryRequest, ChatResponse
-│       └── models.py
+│   └── router.py                   # 各 feature ルーターを束ねる
 │
-├── services/                       # ビジネスロジック層（役割別分離）
+├── features/                       # ドメインごとの機能境界
+│   ├── robot/
+│   │   ├── __init__.py
+│   │   ├── dependencies.py         # get_robot_control_service
+│   │   ├── router.py               # POST /robot/velocity|navigation, WS /robot/velocity
+│   │   ├── schemas.py              # VelocityCommandPayload など
+│   │   └── service.py              # RobotControlService (MQTT ブリッジ)
+│   │
+│   ├── telemetry/
+│   │   ├── __init__.py
+│   │   ├── dependencies.py         # get_datalogger_service / get_telemetry_processor_service
+│   │   ├── router.py               # セッション管理・計測取得 API
+│   │   ├── schemas.py              # TelemetryLogPayload 等
+│   │   └── service.py              # TelemetryProcessorService
+│   │
+│   ├── ml/
+│   │   ├── __init__.py
+│   │   ├── dependencies.py         # get_ml_pipeline_service
+│   │   ├── router.py               # 学習実行・進捗取得 API
+│   │   ├── schemas.py              # TrainingConfigPayload 等
+│   │   └── service.py              # MLPipelineService
+│   │
+│   └── chat/
+│       ├── __init__.py
+│       ├── dependencies.py         # get_chatbot_service
+│       ├── router.py               # Chat リクエスト/履歴 API
+│       ├── schemas.py              # QueryRequestPayload 等
+│       └── service.py              # ChatbotService
 │   ├── __init__.py
-│   ├── robot_control.py            # RobotControlService
-│   │                               # - set_velocity()
-│   │                               # - send_navigation()
-│   │                               # - toggle_simulation()
-│   │
-│   ├── telemetry_processor.py      # TelemetryProcessorService
-│   │                               # - handle_mqtt_message()
-│   │                               # - preprocess_data()
-│   │
-│   ├── datalogger.py               # DataLoggerService
-│   │                               # - start_session()
-│   │                               # - save_session()
-│   │                               # - discard_session()
-│   │
-│   ├── ml_pipeline.py              # MLPipelineService
-│   │                               # - launch_training()
-│   │                               # - stream_metrics()
-│   │                               # - stop_training()
-│   │
-│   └── chatbot_engine.py           # ChatbotService
-│                                   # - retrieve_context()
-│                                   # - generate_response()
+│   ├── robot_control.py            # app.features.robot.service を再エクスポート
+│   ├── telemetry_processor.py      # app.features.telemetry.service を再エクスポート
+│   ├── datalogger.py               # app.features.telemetry.service 内ロジックを委譲
+│   ├── ml_pipeline.py              # app.features.ml.service を再エクスポート
+│   └── chatbot_engine.py           # app.features.chat.service を再エクスポート
 │
 ├── repositories/                   # データアクセス層（DB/Storage操作）
 │   ├── __init__.py
@@ -1480,10 +1460,6 @@ backend/app/
 │   ├── mqtt_client.py              # MQTTClientAdapter
 │   │                               # - publish(), subscribe_with_callback()
 │   │
-│   ├── websocket_manager.py        # WebSocketHub
-│   │                               # - broadcast_to_channel()
-│   │                               # - send_to_client()
-│   │
 │   ├── storage_client.py           # StorageClient
 │   │                               # - upload_image(), download_file()
 │   │
@@ -1492,6 +1468,17 @@ backend/app/
 │   │
 │   └── llm_client.py               # LLMClientAdapter
 │                                   # - generate(), stream_response()
+
+├── infrastructure/                 # リアルタイム通信・共通基盤
+│   ├── __init__.py
+│   ├── messaging/
+│   │   ├── __init__.py
+│   │   └── topics.py               # MQTT トピック定義・ヘルパ
+│   └── realtime/
+│       ├── __init__.py             # WebSocket Hub/チャンネルのエクスポート
+│       ├── handlers.py             # WebSocket ルータ実装
+│       ├── manager.py              # WebSocketHub 実装
+│       └── subscriptions.py        # チャンネル名の定数
 │
 ├── workers/                        # 非同期タスク（Celery/RQ）
 │   ├── __init__.py
@@ -1639,58 +1626,22 @@ frontend/src/
 │       ├── telemetryApi.ts
 │       └── chatbotApi.ts
 │
-├── modules/                        # タブ毎の独立モジュール
-│   │
-│   ├── robot-control/
+├── features/                      # 機能毎に UI / 状態 / 型を集約
+│   ├── robotControl/
 │   │   ├── components/
-│   │   │   ├── JoystickPanel.tsx
-│   │   │   ├── RobotStatus.tsx
-│   │   │   ├── VideoStream.tsx
-│   │   │   ├── NavigationMap.tsx
-│   │   │   └── SimulationToggle.tsx
-│   │   ├── hooks/
-│   │   │   └── useRobotControl.ts
-│   │   ├── services/
-│   │   │   └── robotService.ts
-│   │   └── index.tsx               # タブのエントリポイント
-│   │
-│   ├── database/
-│   │   ├── components/
-│   │   │   ├── DataLoggerControl.tsx
-│   │   │   ├── SessionList.tsx
-│   │   │   ├── DataPreview.tsx
-│   │   │   └── SessionStatus.tsx
-│   │   ├── hooks/
-│   │   │   └── useDataLogger.ts
-│   │   ├── services/
-│   │   │   └── dataloggerService.ts
-│   │   └── index.tsx
-│   │
+│   │   │   └── RobotControlPanel.tsx
+│   │   ├── model/
+│   │   │   └── robotStore.ts
+│   │   └── types.ts
+│   ├── datasets/
+│   │   └── components/
+│   │       └── DatasetBrowser.tsx
 │   ├── ml/
-│   │   ├── components/
-│   │   │   ├── TrainingControl.tsx
-│   │   │   ├── HyperparameterForm.tsx
-│   │   │   ├── MetricsChart.tsx
-│   │   │   ├── TrainingHistory.tsx
-│   │   │   └── ModelComparison.tsx
-│   │   ├── hooks/
-│   │   │   └── useMLTraining.ts
-│   │   ├── services/
-│   │   │   └── mlService.ts
-│   │   └── index.tsx
-│   │
-│   └── chatbot/
-│       ├── components/
-│       │   ├── ChatWindow.tsx
-│       │   ├── MessageList.tsx
-│       │   ├── QueryInput.tsx
-│       │   ├── DocumentPreview.tsx
-│       │   └── ChatHistory.tsx
-│       ├── hooks/
-│       │   └── useChatbot.ts
-│       ├── services/
-│       │   └── chatbotService.ts
-│       └── index.tsx
+│   │   └── components/
+│   │       └── MLDashboard.tsx
+│   └── chat/
+│       └── components/
+│           └── ChatConsole.tsx
 │
 ├── shared/
 │   ├── components/
@@ -1715,7 +1666,6 @@ frontend/src/
 │   │   ├── constants.ts            # 定数
 │   │   └── logger.ts               # クライアント側ログ
 │   ├── types/
-│   │   ├── robot.ts                # ロボット制御型定義
 │   │   ├── telemetry.ts            # センサデータ型定義
 │   │   ├── ml.ts                   # ML型定義
 │   │   ├── chat.ts                 # チャット型定義
@@ -1743,56 +1693,36 @@ backend/app/
 │
 ├── api/
 │   ├── __init__.py
-│   ├── router.py                   # API 統一ルーター
-│   │
-│   ├── robot_api/                  # 1️⃣ Robot API 変換
-│   │   ├── __init__.py
-│   │   ├── router.py               # POST /robot/velocity, /navigation
-│   │   ├── schemas.py              # VelocityCommand, NavigationGoal
-│   │   └── models.py               # (オプション) ローカルモデル
-│   │
-│   ├── telemetry/                  # 3️⃣ センサデータ取得・保存
-│   │   ├── __init__.py
-│   │   ├── router.py               # POST /datalogger/session, GET /sessions
-│   │   ├── schemas.py              # TelemetryLog, SessionConfig
-│   │   └── models.py
-│   │
-│   ├── ml/                         # 2️⃣ 機械学習
-│   │   ├── __init__.py
-│   │   ├── router.py               # POST /ml/train, GET /ml/runs/{id}
-│   │   ├── schemas.py              # TrainingConfig, MetricSnapshot
-│   │   └── models.py
-│   │
-│   └── chatbot/                    # 4️⃣ Chatbot
-│       ├── __init__.py
-│       ├── router.py               # POST /chat/query, GET /chat/history
-│       ├── schemas.py              # QueryRequest, ChatResponse
-│       └── models.py
+│   └── router.py                   # 各 feature ルーターを束ねる
 │
-├── services/                       # ビジネスロジック層（役割別分離）
-│   ├── __init__.py
-│   ├── robot_control.py            # RobotControlService
-│   │                               # - set_velocity()
-│   │                               # - send_navigation()
-│   │                               # - toggle_simulation()
+├── features/                       # ドメインごとの機能境界
+│   ├── robot/
+│   │   ├── __init__.py
+│   │   ├── dependencies.py         # get_robot_control_service
+│   │   ├── router.py               # POST /robot/velocity|navigation, WS /robot/velocity
+│   │   ├── schemas.py              # VelocityCommandPayload など
+│   │   └── service.py              # RobotControlService (MQTT ブリッジ)
 │   │
-│   ├── telemetry_processor.py      # TelemetryProcessorService
-│   │                               # - handle_mqtt_message()
-│   │                               # - preprocess_data()
+│   ├── telemetry/
+│   │   ├── __init__.py
+│   │   ├── dependencies.py         # get_datalogger_service / get_telemetry_processor_service
+│   │   ├── router.py               # セッション管理・計測取得 API
+│   │   ├── schemas.py              # TelemetryLogPayload 等
+│   │   └── service.py              # TelemetryProcessorService
 │   │
-│   ├── datalogger.py               # DataLoggerService
-│   │                               # - start_session()
-│   │                               # - save_session()
-│   │                               # - discard_session()
+│   ├── ml/
+│   │   ├── __init__.py
+│   │   ├── dependencies.py         # get_ml_pipeline_service
+│   │   ├── router.py               # 学習実行・進捗取得 API
+│   │   ├── schemas.py              # TrainingConfigPayload 等
+│   │   └── service.py              # MLPipelineService
 │   │
-│   ├── ml_pipeline.py              # MLPipelineService
-│   │                               # - launch_training()
-│   │                               # - stream_metrics()
-│   │                               # - stop_training()
-│   │
-│   └── chatbot_engine.py           # ChatbotService
-│                                   # - retrieve_context()
-│                                   # - generate_response()
+│   └── chat/
+│       ├── __init__.py
+│       ├── dependencies.py         # get_chatbot_service
+│       ├── router.py               # Chat リクエスト/履歴 API
+│       ├── schemas.py              # QueryRequestPayload 等
+│       └── service.py              # ChatbotService
 │
 ├── repositories/                   # データアクセス層（DB/Storage操作）
 │   ├── __init__.py
@@ -1824,10 +1754,6 @@ backend/app/
 │   ├── mqtt_client.py              # MQTTClientAdapter
 │   │                               # - publish(), subscribe_with_callback()
 │   │
-│   ├── websocket_manager.py        # WebSocketHub
-│   │                               # - broadcast_to_channel()
-│   │                               # - send_to_client()
-│   │
 │   ├── storage_client.py           # StorageClient
 │   │                               # - upload_image(), download_file()
 │   │
@@ -1836,6 +1762,17 @@ backend/app/
 │   │
 │   └── llm_client.py               # LLMClientAdapter
 │                                   # - generate(), stream_response()
+
+├── infrastructure/                 # リアルタイム通信・基盤サービス
+│   ├── __init__.py
+│   ├── messaging/
+│   │   ├── __init__.py
+│   │   └── topics.py               # MQTTトピック定義・ヘルパー
+│   └── realtime/
+│       ├── __init__.py             # WebSocket Hub/チャンネルのエクスポート
+│       ├── handlers.py             # WebSocketルータ実装
+│       ├── manager.py              # WebSocketHub 実装
+│       └── subscriptions.py        # チャンネル名定数
 │
 ├── workers/                        # 非同期タスク（Celery/RQ）
 │   ├── __init__.py
@@ -1991,22 +1928,21 @@ flowchart LR
 ```
 frontend/
   src/
-    app/
-      Router.tsx
-      store/
-      hooks/
-      api/
-    modules/
-      robot-control/
-        components/
-        hooks/
-        services/
-      database/
-        ...
-      ml/
-        ...
-      chatbot/
-        ...
+        app/
+            Router.tsx
+            hooks/
+            api/
+        features/
+            robotControl/
+                components/
+                model/
+                types.ts
+            datasets/
+                components/
+            ml/
+                components/
+            chat/
+                components/
     shared/
       components/
       icons/
@@ -2014,7 +1950,7 @@ frontend/
       utils/
   public/
 ```
-- 各タブは `modules/<tab>/` 配下で独立管理。
+- 各タブは `features/<tab>/` 配下で独立管理。
 - 共通 Header と WebSocket フックは `shared/` に配置。
 
 ### 4.2 共通 UI / ヘッダー設計
@@ -2034,69 +1970,80 @@ frontend/
 
 ```
 backend/app/
-  main.py
-  core/                          # 共有設定・ロギング
-    config.py
-    logging.py
-    dependencies.py
-  
-  # === 役割ごとのモジュール ===
-  api/
-    router.py                    # 統一エントリポイント
-    
-    robot_api/                   # 1️⃣ Frontend→Robot API変換
-      router.py
-      schemas.py
-    
-    ml/                          # 2️⃣ 機械学習
-      router.py
-      schemas.py
-    
-    telemetry/                   # 3️⃣ センサデータ→SQL保存
-      router.py
-      schemas.py
-    
-    chatbot/                     # 4️⃣ Chatbot
-      router.py
-      schemas.py
-  
-  services/                      # ビジネスロジック（分ける）
-    robot_control.py             # Robot API変換ロジック
-    ml_pipeline.py               # ML実行・進捗管理
-    telemetry_processor.py       # センサデータ処理・永続化
-    chatbot_engine.py            # Chatbot質問応答
-    
-  repositories/                  # データアクセス層（共有）
-    robot_state.py
-    sensor_data.py
-    training_runs.py
-    rag_documents.py
-  
-  adapters/                      # 外部連携（共有）
-    mqtt_client.py               # MQTT接続
-    websocket_manager.py         # WebSocket
-    storage_client.py            # 画像保存
-    vector_store.py              # Vector DB
-    llm_client.py                # LLM API
-  
-  workers/                       # 非同期ジョブ（共有）
-    tasks.py                     # Celery/RQ タスク
-  
-  models/                        # SQLAlchemy ORM（共有）
-    __init__.py
-    robot_state.py
-    sensor_data.py
-    training_run.py
-    rag_document.py
+    main.py
+    core/                          # 共有設定・ロギング
+        config.py
+        logger.py
+        base_dependencies.py
+        dependencies.py
+
+    application/
+        interfaces/
+            messaging.py           # MQTTPublisher プロトコル
+            realtime.py            # WebSocketBroadcaster プロトコル
+
+    api/
+        router.py                    # 統一エントリポイント（feature ルータを集約）
+
+    features/
+        robot/
+            router.py
+            service.py
+            dependencies.py
+            schemas.py
+        telemetry/
+            router.py
+            service.py
+            dependencies.py
+            schemas.py
+        ml/
+            router.py
+            service.py
+            dependencies.py
+            schemas.py
+        chat/
+            router.py
+            service.py
+            dependencies.py
+            schemas.py
+
+    repositories/                  # データアクセス層（共有）
+        robot_state.py
+        sensor_data.py
+        training_runs.py
+        rag_documents.py
+
+    adapters/                      # 外部連携（共有）
+        mqtt_client.py               # MQTT接続
+        storage_client.py            # 画像保存
+        vector_store.py              # Vector DB
+        llm_client.py                # LLM API
+
+    infrastructure/
+        messaging/
+            topics.py                # MQTTトピック定義
+        realtime/
+            handlers.py              # WebSocket ルータ
+            manager.py               # WebSocket Hub
+            subscriptions.py         # WS チャンネル定義
+
+    workers/                       # 非同期ジョブ（共有）
+        tasks.py                     # Celery/RQ タスク
+
+    models/                        # SQLAlchemy ORM（共有）
+        robot_state.py
+        sensor_data.py
+        training_run.py
+        rag_document.py
 ```
 
 ### 5.1.1 Robot API の条件付きデータ保存パターン
 
-**基本設計:** robot_api は 単なる「通信ブリッジ」ですが、**セッション記録中は同時にデータを保存** します
+**基本設計:** Robot feature は 単なる「通信ブリッジ」ですが、**セッション記録中は同時にデータを保存** します
 
 ```
 ┌─────────────────────────────────────────────┐
-│ Robot API（robot_control/router.py）        │
+│ Robot API（features/robot/router.py）       │
 │                                             │
 │  POST /robot/velocity                       │
 │    ├─ [常に実行] MQTTへ速度指令を送信       │
@@ -2119,55 +2066,75 @@ backend/app/
 ```
 
 **セッション状態の管理:**
-- `DataLoggerService` が「現在アクティブなセッションID」を管理
-- `RobotControlService` が `DataLoggerService` をチェック
+- `DataLoggerService` (features/telemetry/service.py) が「現在アクティブなセッションID」を管理
+- `RobotControlService` (features/robot/service.py) が `DataLoggerService` をチェック
 - セッション記録中 → `SensorDataRepository` へ保存
 - セッション未開始/終了後 → 保存せず、単にMQTT/WS転送のみ
 
 ### 5.2 クラス図
 ```
 backend/
-  app/
-    main.py
-    core/
-      config.py
-      logging.py
-      dependencies.py
-    api/
-      router.py
-      robot_control/
-      database/
-      ml/
-      chatbot/
-    services/
-      robot.py
-      telemetry.py
-      datalogger.py
-      ml_pipeline.py
-      chatbot.py
-    repositories/
-      robot_state.py
-      datasets.py
-      training_runs.py
-      rag_documents.py
-    schemas/
-      robot.py
-      telemetry.py
-      datasets.py
-      ml.py
-      chatbot.py
-    workers/
-      tasks.py
-    adapters/
-      mqtt_client.py
-      websocket_manager.py
-      storage_client.py
-      vector_store.py
-      llm_client.py
+    app/
+        main.py
+        core/
+            config.py
+            logger.py
+            base_dependencies.py
+            dependencies.py
+        application/
+            interfaces/
+                messaging.py
+                realtime.py
+        api/
+            router.py
+        features/
+            robot/
+                router.py
+                service.py
+                dependencies.py
+                schemas.py
+            telemetry/
+                router.py
+                service.py
+                dependencies.py
+                schemas.py
+            ml/
+                router.py
+                service.py
+                dependencies.py
+                schemas.py
+            chat/
+                router.py
+                service.py
+                dependencies.py
+                schemas.py
+        repositories/
+            robot_state.py
+            sensor_data.py
+            training_runs.py
+            rag_documents.py
+        workers/
+            tasks.py
+        adapters/
+            mqtt_client.py
+            storage_client.py
+            vector_store.py
+            llm_client.py
+        infrastructure/
+            messaging/
+                topics.py
+            realtime/
+                handlers.py
+                manager.py
+                subscriptions.py
 ```
-- `services/` がビジネスロジックを集約。
+- `application/interfaces/` が Feature から利用する抽象プロトコル (MQTT・WebSocket・UnitOfWork など) を提供。
+- `application/use_cases/` がユースケース（ビジネスオーケストレーション）を実装。
+- ビジネスロジックは各 feature ディレクトリの `service.py` に集約。
 - `repositories/` はデータアクセス層 (SQLAlchemy)。
 - `adapters/` で外部システムと疎結合化。
+- `infrastructure/` が WebSocket Hub や MQTT トピック等の共通リアルタイム基盤を提供。
+- `infrastructure/database/` に UnitOfWork 実装等の永続化向けヘルパーを配置。
 
 ### 5.2 クラス図
 ```mermaid

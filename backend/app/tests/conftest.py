@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import AsyncGenerator
 
 import pytest
@@ -10,8 +9,8 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core.dependencies import get_robot_control_service
+from app.features.robot.service import NavigationGoalPayload, VelocityCommandPayload
 from app.main import app
-from app.services.robot_control import NavigationGoalPayload, VelocityCommandPayload
 
 
 @pytest_asyncio.fixture

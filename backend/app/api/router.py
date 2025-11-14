@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.chatbot.router import router as chatbot_router
-from app.api.ml.router import router as ml_router
-from app.api.robot_api.router import router as robot_router
-from app.api.telemetry.router import router as telemetry_router
+from app.features.chat.router import router as chatbot_router
+from app.features.ml.router import router as ml_router
+from app.features.robot.router import router as robot_router
+from app.features.telemetry.router import router as telemetry_router
 
 api_router = APIRouter()
 
