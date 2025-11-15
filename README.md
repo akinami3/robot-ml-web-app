@@ -30,95 +30,67 @@ sequenceDiagram
 ```
 
 ```
+backend/app/
+    main.py
+    api/
+        router.py                  # Feature ルータの集約
     core/
         base_dependencies.py       # 共通依存性 (DB, state, adapters)
-        dependencies.py            # Feature 依存性の集約
-
+        config.py
+        dependencies.py
+        logger.py
+    application/
+        events.py                  # WebSocket/MQTT チャネルとイベント列挙
+        interfaces/
+            __init__.py
+            messaging.py           # MQTTPublisher Protocol
+            realtime.py            # WebSocketBroadcaster Protocol
+            repositories.py        # Repository Protocol 群
+            unit_of_work.py        # 非同期 UnitOfWork 抽象
+        use_cases/
+            chat.py
+            ml.py
+            robot.py
+            telemetry.py
+    infrastructure/
+        database/
+            unit_of_work.py        # SQLAlchemy UnitOfWork 実装
+        factories/
+            __init__.py
+            telemetry.py           # Telemetry 用ユースケース組み立て
+        realtime/
+            __init__.py
+            handlers.py
+            manager.py
+            subscriptions.py       # application.events 由来のチャネル
     features/
         robot/
-            router.py                # HTTP/WS インタフェース
-            service.py               # RobotControlService
-            dependencies.py          # get_robot_control_service
+            router.py              # HTTP/WS インタフェース
+            service.py             # RobotControlService (alias 経由で公開)
+            dependencies.py        # get_robot_control_service
             schemas.py
         telemetry/
             router.py
-            service.py               # DataLoggerService / TelemetryProcessorService
-            dependencies.py          # get_datalogger_service 等
+            service.py             # DataLoggerService / TelemetryProcessorService
+            dependencies.py        # get_datalogger_service 等
             schemas.py
         ml/
             router.py
-            service.py               # MLPipelineService
-            dependencies.py          # get_ml_pipeline_service
+            service.py             # MLPipelineService
+            dependencies.py        # get_ml_pipeline_service
             schemas.py
         chat/
             router.py
-            service.py               # ChatbotService
-            dependencies.py          # get_chatbot_service
+            service.py             # ChatbotService
+            dependencies.py        # get_chatbot_service
             schemas.py
-
     repositories/
+        dataset_sessions.py
         robot_state.py
         sensor_data.py
-        ```
-            api/
-                router.py                  # 統一エントリポイント（feature ルータ集約）
-
-            features/
-                robot/
-                    router.py
-                    service.py
-                    dependencies.py
-                    schemas.py
-                telemetry/
-                    router.py
-                    service.py
-                    dependencies.py
-                    schemas.py
-                ml/
-                    router.py
-                    service.py
-                    dependencies.py
-                    schemas.py
-                chat/
-                    router.py
-                    service.py
-                    dependencies.py
-                    schemas.py
-
-            core/
-                base_dependencies.py       # DB・MQTT・WS など共通依存性
-                dependencies.py            # FastAPI DI エントリ
-
-            repositories/                # データアクセス層（共有）
-                robot_state.py
-                sensor_data.py
-                training_runs.py
-                rag_documents.py
-
-            adapters/                    # 外部連携（共有）
-                mqtt_client.py             # MQTT接続
-                storage_client.py          # 画像保存
-                vector_store.py            # Vector DB
-                llm_client.py              # LLM API
-
-            infrastructure/
-                messaging/
-                    topics.py              # MQTTトピック定義
-                realtime/
-                    __init__.py            # Hub/チャンネルのエクスポート
-                    handlers.py            # WebSocketルータ
-                    manager.py             # WebSocket Hub
-                    subscriptions.py       # チャンネル名定義
-
-            workers/
-                tasks.py                   # Celery/RQ タスク
-
-            models/                      # SQLAlchemy ORM
-                robot_state.py
-                sensor_data.py
-                training_run.py
-                rag_document.py
-        ```
+        training_runs.py
+        rag_documents.py
+```
 ```
 
 以下、copilot生成による仮の設計書
@@ -1971,19 +1943,27 @@ frontend/
 ```
 backend/app/
     main.py
-    core/                          # 共有設定・ロギング
-        config.py
-        logger.py
+    api/
+        router.py                    # Feature ルータの集約
+    core/                            # 共通設定・ロギング
         base_dependencies.py
+        config.py
         dependencies.py
+        logger.py
 
     application/
+        events.py                    # WebSocket/MQTT チャネル名とイベント定義
         interfaces/
-            messaging.py           # MQTTPublisher プロトコル
-            realtime.py            # WebSocketBroadcaster プロトコル
-
-    api/
-        router.py                    # 統一エントリポイント（feature ルータを集約）
+            __init__.py
+            messaging.py             # MQTTPublisher Protocol
+            realtime.py              # WebSocketBroadcaster Protocol
+            repositories.py          # Repository Protocol 群
+            unit_of_work.py          # 非同期 UnitOfWork 抽象
+        use_cases/
+            chat.py
+            ml.py
+            robot.py
+            telemetry.py
 
     features/
         robot/
@@ -2007,30 +1987,35 @@ backend/app/
             dependencies.py
             schemas.py
 
-    repositories/                  # データアクセス層（共有）
+    infrastructure/
+        database/
+            unit_of_work.py          # SQLAlchemy UnitOfWork 実装
+        factories/
+            __init__.py
+            telemetry.py             # Telemetry 用ユースケース組み立て
+        realtime/
+            __init__.py
+            handlers.py
+            manager.py
+            subscriptions.py         # application.events を再公開
+
+    repositories/                    # データアクセス層（共有）
+        dataset_sessions.py
         robot_state.py
         sensor_data.py
         training_runs.py
         rag_documents.py
 
-    adapters/                      # 外部連携（共有）
-        mqtt_client.py               # MQTT接続
-        storage_client.py            # 画像保存
-        vector_store.py              # Vector DB
-        llm_client.py                # LLM API
+    adapters/                        # 外部連携（共有）
+        mqtt_client.py
+        storage_client.py
+        vector_store.py
+        llm_client.py
 
-    infrastructure/
-        messaging/
-            topics.py                # MQTTトピック定義
-        realtime/
-            handlers.py              # WebSocket ルータ
-            manager.py               # WebSocket Hub
-            subscriptions.py         # WS チャンネル定義
+    workers/                         # 非同期ジョブ
+        tasks.py
 
-    workers/                       # 非同期ジョブ（共有）
-        tasks.py                     # Celery/RQ タスク
-
-    models/                        # SQLAlchemy ORM（共有）
+    models/                          # SQLAlchemy ORM
         robot_state.py
         sensor_data.py
         training_run.py
@@ -2128,13 +2113,15 @@ backend/
                 manager.py
                 subscriptions.py
 ```
-- `application/interfaces/` が Feature から利用する抽象プロトコル (MQTT・WebSocket・UnitOfWork など) を提供。
+- `application/interfaces/` が Feature から利用する抽象プロトコル (MQTT・WebSocket・UnitOfWork・Repository など) を提供。
+- `application/events.py` がチャネル名やイベント列挙を定義し、リアルタイム基盤と共有。
 - `application/use_cases/` がユースケース（ビジネスオーケストレーション）を実装。
 - ビジネスロジックは各 feature ディレクトリの `service.py` に集約。
 - `repositories/` はデータアクセス層 (SQLAlchemy)。
 - `adapters/` で外部システムと疎結合化。
 - `infrastructure/` が WebSocket Hub や MQTT トピック等の共通リアルタイム基盤を提供。
 - `infrastructure/database/` に UnitOfWork 実装等の永続化向けヘルパーを配置。
+- `infrastructure/factories/` がユースケース組み立ての共通ロジックを保持。
 
 ### 5.2 クラス図
 ```mermaid

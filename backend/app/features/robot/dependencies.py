@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import Depends, Request
 
+from app.infrastructure.factories.telemetry import build_datalogger
 from app.application.interfaces import UnitOfWork
-from app.application.use_cases.telemetry import DataLoggerUseCase, create_datalogger_use_case
 from app.core.base_dependencies import (
     get_mqtt_adapter,
     get_unit_of_work,
@@ -22,7 +22,7 @@ async def get_robot_control_service(
     request: Request,
     unit_of_work: UnitOfWork = Depends(get_unit_of_work),
 ) -> RobotControlService:
-    datalogger: DataLoggerUseCase = create_datalogger_use_case(unit_of_work=unit_of_work)
+    datalogger = build_datalogger(unit_of_work)
     return RobotControlService(
         unit_of_work=unit_of_work,
         mqtt_adapter=get_mqtt_adapter(request),

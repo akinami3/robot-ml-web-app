@@ -8,11 +8,14 @@ from typing import Any
 
 from celery import Celery
 
-from app.application.interfaces import UnitOfWork, WebSocketBroadcaster
-from app.infrastructure.realtime import ML_CHANNEL
-from app.repositories.dataset_sessions import DatasetSessionRepository
-from app.repositories.training_metrics import TrainingMetricRepository
-from app.repositories.training_runs import TrainingRunRepository
+from app.application.events import MLEvent, ML_CHANNEL
+from app.application.interfaces import (
+    DatasetSessionRepositoryProtocol,
+    TrainingMetricRepositoryProtocol,
+    TrainingRunRepositoryProtocol,
+    UnitOfWork,
+    WebSocketBroadcaster,
+)
 
 
 @dataclass(slots=True)
@@ -30,9 +33,9 @@ class MLPipelineUseCase:
         self,
         *,
         unit_of_work: UnitOfWork,
-        training_run_repo: TrainingRunRepository,
-        training_metric_repo: TrainingMetricRepository,
-        dataset_repo: DatasetSessionRepository,
+    training_run_repo: TrainingRunRepositoryProtocol,
+    training_metric_repo: TrainingMetricRepositoryProtocol,
+    dataset_repo: DatasetSessionRepositoryProtocol,
         websocket_hub: WebSocketBroadcaster,
         celery_app: Celery,
     ) -> None:
@@ -49,12 +52,12 @@ class MLPipelineUseCase:
             active = await self._dataset_repo.get_active_by_robot(payload.robot_id)
             dataset_session_id = active.id if active else None
 
-        run = await self._training_runs.create_run(
-            model_name=payload.model_name,
-            dataset_session_id=dataset_session_id,
-            params=payload.hyperparameters,
-        )
-        await self._uow.commit()
+        async with self._uow:
+            run = await self._training_runs.create_run(
+                model_name=payload.model_name,
+                dataset_session_id=dataset_session_id,
+                params=payload.hyperparameters,
+            )
 
         self._celery.send_task(
             "app.workers.tasks.train_model_task",
@@ -63,7 +66,10 @@ class MLPipelineUseCase:
 
         await self._ws_hub.broadcast(
             channel=ML_CHANNEL,
-            message={"event": "training_queued", "run_id": str(run.id)},
+            message={
+                "event": MLEvent.TRAINING_QUEUED.value,
+                "run_id": str(run.id),
+            },
         )
         return run.id
 

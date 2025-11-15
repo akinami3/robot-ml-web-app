@@ -46,6 +46,11 @@ class DatasetSessionRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return result.scalars().first()
 
+    async def delete(self, session_id: uuid.UUID) -> None:
+        session_obj = await self.get(session_id)
+        if session_obj:
+            await self.session.delete(session_obj)
+
     async def list_sessions(self, *, active_only: bool | None = None) -> list[DatasetSession]:
         stmt = select(DatasetSession)
         if active_only is True:

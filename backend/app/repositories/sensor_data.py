@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SensorData
@@ -39,3 +39,7 @@ class SensorDataRepository(BaseRepository):
         stmt = select(SensorData).where(SensorData.session_id == session_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def delete_for_session(self, session_id: uuid.UUID) -> None:
+        stmt = delete(SensorData).where(SensorData.session_id == session_id)
+        await self.session.execute(stmt)

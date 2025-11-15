@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from fastapi import Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.interfaces import UnitOfWork
 from app.core.base_dependencies import (
-    get_unit_of_work,
+    get_db_session,
     get_llm_client,
     get_vector_store,
     get_websocket_hub,
@@ -20,11 +20,10 @@ __all__ = ["get_chatbot_service"]
 
 async def get_chatbot_service(
     request: Request,
-    unit_of_work: UnitOfWork = Depends(get_unit_of_work),
+    session: AsyncSession = Depends(get_db_session),
 ) -> ChatbotService:
     return ChatbotService(
-        unit_of_work=unit_of_work,
-        rag_repo=RAGDocumentRepository(unit_of_work.session),
+        rag_repo=RAGDocumentRepository(session),
         vector_store=get_vector_store(request),
         llm_client=get_llm_client(request),
         websocket_hub=get_websocket_hub(request),

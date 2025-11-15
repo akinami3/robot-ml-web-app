@@ -17,6 +17,7 @@ from app.features.telemetry.dependencies import (
     create_datalogger_service,
     create_telemetry_processor_service,
 )
+from app.infrastructure.database.unit_of_work import SqlAlchemyUnitOfWork
 from app.infrastructure.messaging import TELEMETRY_SUBSCRIPTION_PATTERN
 from app.infrastructure.realtime import WebSocketHub
 from app.infrastructure.realtime.handlers import router as websocket_router
@@ -47,9 +48,10 @@ async def lifespan(app: FastAPI):
 		robot_id = parts[1] if len(parts) > 1 else "unknown"
 		sensor_type = parts[-1]
 		async with session_factory() as session:
-			datalogger = create_datalogger_service(session)
+			unit_of_work = SqlAlchemyUnitOfWork(session)
+			datalogger = create_datalogger_service(unit_of_work)
 			telemetry_service = create_telemetry_processor_service(
-				session=session,
+				unit_of_work=unit_of_work,
 				datalogger=datalogger,
 				websocket_hub=websocket_hub,
 			)

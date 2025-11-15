@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.application.interfaces import MQTTPublisher, UnitOfWork, WebSocketBroadcaster
+from app.application.events import ROBOT_CHANNEL, RobotEvent
+from app.application.interfaces import (
+    MQTTPublisher,
+    RobotStateRepositoryProtocol,
+    UnitOfWork,
+    WebSocketBroadcaster,
+)
 from app.application.use_cases.telemetry import DataLoggerUseCase
 from app.infrastructure.messaging import (
     navigation_command_topic,
     velocity_command_topic,
 )
-from app.infrastructure.realtime import ROBOT_CHANNEL
-from app.repositories.robot_state import RobotStateRepository
 
 
 @dataclass(slots=True)
@@ -38,7 +42,7 @@ class RobotControlUseCase:
         unit_of_work: UnitOfWork,
         mqtt_adapter: MQTTPublisher,
         datalogger: DataLoggerUseCase,
-        robot_state_repository: RobotStateRepository,
+        robot_state_repository: RobotStateRepositoryProtocol,
         websocket_hub: WebSocketBroadcaster,
     ) -> None:
         self._uow = unit_of_work
@@ -55,17 +59,17 @@ class RobotControlUseCase:
         if not session_id:
             return
 
-        await self._robot_states.create_state(
-            robot_id=payload.robot_id,
-            status="moving",
-            battery_level=100,
-            session_id=session_id,
-        )
-        await self._uow.commit()
+        async with self._uow:
+            await self._robot_states.create_state(
+                robot_id=payload.robot_id,
+                status="moving",
+                battery_level=100,
+                session_id=session_id,
+            )
         await self._ws_hub.broadcast(
             channel=ROBOT_CHANNEL,
             message={
-                "event": "velocity",
+                "event": RobotEvent.VELOCITY.value,
                 "robot_id": payload.robot_id,
                 "linear": payload.linear,
                 "angular": payload.angular,
@@ -78,7 +82,7 @@ class RobotControlUseCase:
         await self._ws_hub.broadcast(
             channel=ROBOT_CHANNEL,
             message={
-                "event": "navigation",
+                "event": RobotEvent.NAVIGATION.value,
                 "robot_id": payload.robot_id,
                 "target": {
                     "x": payload.target_x,

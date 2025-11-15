@@ -6,9 +6,11 @@ from dataclasses import dataclass
 
 from app.adapters.llm_client import LLMClientAdapter
 from app.adapters.vector_store import VectorStoreAdapter
-from app.application.interfaces import UnitOfWork, WebSocketBroadcaster
-from app.infrastructure.realtime import CHAT_CHANNEL
-from app.repositories.rag_documents import RAGDocumentRepository
+from app.application.events import ChatEvent, CHAT_CHANNEL
+from app.application.interfaces import (
+    RAGDocumentRepositoryProtocol,
+    WebSocketBroadcaster,
+)
 
 
 @dataclass(slots=True)
@@ -24,13 +26,11 @@ class ChatbotUseCase:
     def __init__(
         self,
         *,
-        unit_of_work: UnitOfWork,
-        rag_repo: RAGDocumentRepository,
+    rag_repo: RAGDocumentRepositoryProtocol,
         vector_store: VectorStoreAdapter,
         llm_client: LLMClientAdapter,
         websocket_hub: WebSocketBroadcaster,
     ) -> None:
-        self._uow = unit_of_work
         self._rag_repo = rag_repo
         self._vector_store = vector_store
         self._llm_client = llm_client
@@ -56,8 +56,13 @@ class ChatbotUseCase:
             "answer": response,
             "documents": documents,
         }
-        await self._ws_hub.broadcast(channel=CHAT_CHANNEL, message=message)
-        await self._uow.commit()
+        await self._ws_hub.broadcast(
+            channel=CHAT_CHANNEL,
+            message={
+                "event": ChatEvent.MESSAGE.value,
+                **message,
+            },
+        )
         return message
 
 
