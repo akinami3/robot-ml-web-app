@@ -1,51 +1,86 @@
-from __future__ import annotations
+"""
+Machine Learning API endpoints
+"""
+from typing import List
+from uuid import UUID
 
-import asyncio
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from app.dependencies import get_db
+from app.schemas.ml import (
+    EvaluationResult,
+    MLModelCreate,
+    MLModelResponse,
+    TrainingMetricsResponse,
+    TrainingStartRequest,
+    TrainingStopRequest,
+)
 
-from app.core.dependencies import get_db, get_ws_manager
-from app.infrastructure.websocket.connection_manager import WebSocketConnectionManager
-from app.schemas.training import TrainingJob, TrainingJobCreate
-from app.services.training_service import TrainingService
-from app.workers.training_worker import TrainingTask, TrainingWorker
-
-router = APIRouter(prefix="/ml", tags=["ml"])
-
-
-_worker_instance: TrainingWorker | None = None
-
-
-def get_training_service(
-    db: Session = Depends(get_db),
-    ws_manager: WebSocketConnectionManager = Depends(get_ws_manager),
-) -> TrainingService:
-    return TrainingService(db, ws_manager)
+router = APIRouter()
 
 
-def get_training_worker(
-    ws_manager: WebSocketConnectionManager = Depends(get_ws_manager),
-) -> TrainingWorker:
-    global _worker_instance
-    if _worker_instance is None:
-        _worker_instance = TrainingWorker(ws_manager)
-        asyncio.create_task(_worker_instance.run_forever())
-    return _worker_instance
+# Model Management Endpoints
+@router.post("/models", response_model=MLModelResponse)
+async def create_model(model: MLModelCreate, db: AsyncSession = Depends(get_db)):
+    """Create new ML model"""
+    # TODO: Implement
+    raise HTTPException(status_code=501, detail="Not implemented yet")
 
 
-@router.post("/jobs", response_model=TrainingJob)
-def create_job(
-    payload: TrainingJobCreate,
-    service: TrainingService = Depends(get_training_service),
-    worker: TrainingWorker = Depends(get_training_worker),
-) -> TrainingJob:
-    job = service.create_job(payload)
-    task = TrainingTask(job_id=job.id, epochs=payload.config.get("epochs", 3))
-    asyncio.create_task(worker.enqueue(task))
-    return job
+@router.get("/models", response_model=List[MLModelResponse])
+async def list_models(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+    """List all ML models"""
+    # TODO: Implement
+    raise HTTPException(status_code=501, detail="Not implemented yet")
 
 
-@router.get("/jobs", response_model=list[TrainingJob])
-def list_jobs(service: TrainingService = Depends(get_training_service)) -> list[TrainingJob]:
-    return service.list_jobs()
+@router.get("/models/{model_id}", response_model=MLModelResponse)
+async def get_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Get ML model details"""
+    # TODO: Implement
+    raise HTTPException(status_code=501, detail="Not implemented yet")
+
+
+@router.delete("/models/{model_id}")
+async def delete_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Delete ML model"""
+    # TODO: Implement
+    raise HTTPException(status_code=501, detail="Not implemented yet")
+
+
+# Training Endpoints
+@router.post("/training/start")
+async def start_training(request: TrainingStartRequest, db: AsyncSession = Depends(get_db)):
+    """Start model training"""
+    # TODO: Implement - should start training in background
+    raise HTTPException(status_code=501, detail="Not implemented yet")
+
+
+@router.post("/training/stop")
+async def stop_training(request: TrainingStopRequest, db: AsyncSession = Depends(get_db)):
+    """Stop model training"""
+    # TODO: Implement
+    raise HTTPException(status_code=501, detail="Not implemented yet")
+
+
+@router.get("/training/{model_id}/status")
+async def get_training_status(model_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Get training status"""
+    # TODO: Implement
+    raise HTTPException(status_code=501, detail="Not implemented yet")
+
+
+@router.get("/training/{model_id}/metrics", response_model=TrainingMetricsResponse)
+async def get_training_metrics(model_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Get training metrics history"""
+    # TODO: Implement
+    raise HTTPException(status_code=501, detail="Not implemented yet")
+
+
+# Evaluation Endpoints
+@router.post("/models/{model_id}/evaluate", response_model=EvaluationResult)
+async def evaluate_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Evaluate model on test set"""
+    # TODO: Implement
+    raise HTTPException(status_code=501, detail="Not implemented yet")
