@@ -1,0 +1,5 @@
+ROBOT_VELOCITY_CMD = "robot/control/velocity"
+ROBOT_NAVIGATION_CMD = "robot/control/navigation"
+ROBOT_CAMERA_STREAM = "robot/camera/stream"
+ROBOT_STATE_STREAM = "robot/state"
+TELEMETRY_BASE = "robot/telemetry"

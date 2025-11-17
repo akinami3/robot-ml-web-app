@@ -1,67 +1,34 @@
-"""Application configuration powered by Pydantic settings."""
-
 from functools import lru_cache
 from typing import List
 
-from pydantic import AnyHttpUrl, Field
-from pydantic_settings import BaseSettings
+from pydantic import BaseSettings, Field, AnyHttpUrl
 
 
 class Settings(BaseSettings):
-    """Centralised strongly-typed runtime configuration."""
-
-    project_name: str = Field(default="robot-ml-web-app")
-    api_prefix: str = Field(default="/api")
-    environment: str = Field(default="local")
-
+    api_v1_prefix: str = "/api/v1"
+    ws_prefix: str = "/ws"
+    project_name: str = "Robot ML Web App"
+    environment: str = Field("development", env="APP_ENV")
     backend_cors_origins: List[AnyHttpUrl] = Field(default_factory=list)
-
-    database_url: str = Field(
-        default="postgresql+asyncpg://robot_ml:robot_ml@localhost:5432/robot_ml"
-    )
-    alembic_database_url: str | None = Field(default=None)
-
-    redis_url: str = Field(default="redis://localhost:6379/0")
-
-    mqtt_host: str = Field(default="localhost")
-    mqtt_port: int = Field(default=1883)
-    mqtt_username: str | None = Field(default=None)
-    mqtt_password: str | None = Field(default=None)
-    mqtt_keepalive_s: int = Field(default=60)
-    mqtt_client_id: str = Field(default="robot-ml-web-app-api")
-
-    websocket_heartbeat_interval_s: int = Field(default=30)
-
-    celery_broker_url: str = Field(default="redis://localhost:6379/1")
-    celery_result_backend: str = Field(default="redis://localhost:6379/2")
-
-    object_storage_endpoint: str | None = Field(default=None)
-    object_storage_bucket: str = Field(default="robot-ml-artifacts")
-    object_storage_access_key: str | None = Field(default=None)
-    object_storage_secret_key: str | None = Field(default=None)
-
-    vector_store_url: str | None = Field(default=None)
-    llm_api_base: str | None = Field(default=None)
-    llm_api_key: str | None = Field(default=None)
-
-    jwt_secret_key: str = Field(default="changeme")
-    jwt_algorithm: str = Field(default="HS256")
-    access_token_expire_minutes: int = Field(default=60 * 24)
-
-    log_level: str = Field(default="INFO")
-    log_json: bool = Field(default=True)
+    database_url: str = Field("sqlite:///./app.db", env="DATABASE_URL")
+    mqtt_broker_url: str = Field("mqtt://localhost:1883", env="MQTT_BROKER_URL")
+    mqtt_username: str | None = Field(None, env="MQTT_USERNAME")
+    mqtt_password: str | None = Field(None, env="MQTT_PASSWORD")
+    media_root: str = Field("/app/data/uploads/media", env="MEDIA_ROOT")
+    models_root: str = Field("/app/data/uploads/models", env="MODELS_ROOT")
+    telemetry_buffer_size: int = Field(512, env="TELEMETRY_BUFFER_SIZE")
+    telemetry_flush_interval_ms: int = Field(500, env="TELEMETRY_FLUSH_INTERVAL_MS")
+    llm_provider: str = Field("openai", env="LLM_PROVIDER")
+    llm_model: str = Field("gpt-4o", env="LLM_MODEL")
+    llm_api_key: str | None = Field(None, env="LLM_API_KEY")
+    embedding_model: str = Field("text-embedding-3-large", env="EMBEDDING_MODEL")
+    redis_url: str | None = Field(None, env="REDIS_URL")
 
     class Config:
         env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+        case_sensitive = True
 
 
-@lru_cache
+@lru_cache()
 def get_settings() -> Settings:
-    """Return cached settings instance."""
-
     return Settings()
-
-
-settings = get_settings()

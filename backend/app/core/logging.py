@@ -1,38 +1,39 @@
-"""Structured logging configuration for the application."""
-
-from __future__ import annotations
-
 import logging
-from typing import Any
-
-import structlog
-
-from .config import settings
+import logging.config
+from pathlib import Path
 
 
-def configure_logging() -> None:
-    """Configure stdlib + structlog logging according to settings."""
+DEFAULT_LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(levelname)s %(asctime)s [%(name)s] %(message)s",
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "level": "DEBUG",
+        }
+    },
+    "loggers": {
+        "": {
+            "handlers": ["console"],
+            "level": "INFO",
+        },
+        "uvicorn": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
 
-    timestamper = structlog.processors.TimeStamper(fmt="iso")
-    shared_processors: list[Any] = [
-        structlog.contextvars.merge_contextvars,
-        timestamper,
-        structlog.processors.add_log_level,
-    ]
 
-    if settings.log_json:
-        renderer: Any = structlog.processors.JSONRenderer()
+def setup_logging(config_path: Path | None = None) -> None:
+    if config_path and config_path.exists():
+        logging.config.fileConfig(config_path)
     else:
-        renderer = structlog.dev.ConsoleRenderer()
-
-    structlog.configure(
-        processors=shared_processors
-        + [
-            structlog.processors.EventRenamer("message"),
-            renderer,
-        ],
-        wrapper_class=structlog.make_filtering_bound_logger(getattr(logging, settings.log_level.upper(), logging.INFO)),
-        cache_logger_on_first_use=True,
-    )
-
-    logging.basicConfig(level=settings.log_level)
+        logging.config.dictConfig(DEFAULT_LOGGING_CONFIG)
