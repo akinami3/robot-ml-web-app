@@ -16,6 +16,7 @@ from app.schemas.database import (
     RecordingSessionResponse,
     RecordingSessionUpdate,
 )
+from app.services.database.recording_service import get_recording_service
 
 router = APIRouter()
 
@@ -27,36 +28,40 @@ async def start_recording(
     db: AsyncSession = Depends(get_db),
 ):
     """Start a new recording session"""
-    # TODO: Implement recording service
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    recording_service = get_recording_service()
+    return await recording_service.start_recording(db, session)
 
 
 @router.post("/recording/{session_id}/pause", response_model=RecordingControlResponse)
 async def pause_recording(session_id: UUID, db: AsyncSession = Depends(get_db)):
     """Pause recording session"""
-    # TODO: Implement
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    recording_service = get_recording_service()
+    result = await recording_service.pause_recording(db, session_id)
+    return RecordingControlResponse(**result)
 
 
 @router.post("/recording/{session_id}/resume", response_model=RecordingControlResponse)
 async def resume_recording(session_id: UUID, db: AsyncSession = Depends(get_db)):
     """Resume paused recording session"""
-    # TODO: Implement
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    recording_service = get_recording_service()
+    result = await recording_service.resume_recording(db, session_id)
+    return RecordingControlResponse(**result)
 
 
 @router.post("/recording/{session_id}/save", response_model=RecordingControlResponse)
 async def save_recording(session_id: UUID, db: AsyncSession = Depends(get_db)):
     """Save and complete recording session"""
-    # TODO: Implement
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    recording_service = get_recording_service()
+    result = await recording_service.save_recording(db, session_id)
+    return RecordingControlResponse(**result)
 
 
 @router.post("/recording/{session_id}/discard", response_model=RecordingControlResponse)
 async def discard_recording(session_id: UUID, db: AsyncSession = Depends(get_db)):
     """Discard recording session"""
-    # TODO: Implement
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    recording_service = get_recording_service()
+    result = await recording_service.discard_recording(db, session_id)
+    return RecordingControlResponse(**result)
 
 
 @router.post("/recording/{session_id}/end")

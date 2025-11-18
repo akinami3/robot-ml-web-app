@@ -48,11 +48,37 @@ class MLModelResponse(BaseModel):
 
 
 # Training Control Schemas
+class TrainingConfig(BaseModel):
+    """Training configuration"""
+    
+    dataset_id: UUID
+    epochs: int = Field(100, ge=1, le=1000)
+    batch_size: int = Field(32, ge=1)
+    learning_rate: float = Field(0.001, gt=0.0, le=1.0)
+    device: str = Field("cpu", pattern="^(cpu|cuda)$")
+    early_stopping_patience: Optional[int] = None
+    checkpoint_interval: int = Field(10, ge=1)
+
+
+class TrainingStatus(BaseModel):
+    """Training status"""
+    
+    model_id: UUID
+    is_training: bool
+    current_epoch: int
+    total_epochs: int
+    train_loss: float
+    val_loss: float
+    train_accuracy: float
+    val_accuracy: float
+    learning_rate: float
+
+
 class TrainingStartRequest(BaseModel):
     """Start training request"""
 
     model_id: UUID
-    resume: bool = False
+    config: TrainingConfig
 
 
 class TrainingStopRequest(BaseModel):

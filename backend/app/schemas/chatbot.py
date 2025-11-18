@@ -8,12 +8,43 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+# Conversation Schemas
+class ConversationCreate(BaseModel):
+    """Create conversation"""
+    
+    title: Optional[str] = None
+
+
+class ConversationResponse(BaseModel):
+    """Conversation response"""
+    
+    id: UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # Chat Message Schemas
 class ChatMessageCreate(BaseModel):
     """Create chat message"""
 
     content: str = Field(..., min_length=1)
-    conversation_id: Optional[UUID] = None
+
+
+class ChatMessage(BaseModel):
+    """Chat message"""
+    
+    id: UUID
+    conversation_id: UUID
+    role: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class ChatMessageResponse(BaseModel):
@@ -50,3 +81,4 @@ class ChatResponse(BaseModel):
 
     message: ChatMessageResponse
     sources: Optional[List[str]] = None
+
