@@ -44,7 +44,7 @@ const simulatorRunning = ref(false)
 
 async function startSimulator() {
   try {
-    await api.post('/robot-control/simulator/start')
+    await api.post('/api/v1/robot/simulator/start')
     simulatorRunning.value = true
   } catch (error) {
     console.error('Failed to start simulator:', error)
@@ -54,7 +54,7 @@ async function startSimulator() {
 
 async function stopSimulator() {
   try {
-    await api.post('/robot-control/simulator/stop')
+    await api.post('/api/v1/robot/simulator/stop')
     simulatorRunning.value = false
   } catch (error) {
     console.error('Failed to stop simulator:', error)

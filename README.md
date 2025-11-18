@@ -31,19 +31,23 @@
 ## 🏗️ Technology Stack
 
 ### Frontend
-- **Framework**: Vue.js 3 (Composition API + TypeScript)
-- **Build Tool**: Vite
-- **State Management**: Pinia
-- **UI Library**: TailwindCSS (optional)
-- **Charts**: Chart.js / ECharts
+- **Framework**: Vue 3.3.10 (Composition API + TypeScript)
+- **Build Tool**: Vite 5.0.8
+- **State Management**: Pinia 2.1.7
+- **HTTP Client**: Axios 1.6.2
+- **Visualization**: Chart.js 4.4.0
+- **Joystick**: nipplejs 0.10.1
+- **Routing**: Vue Router 4.2.5
 
 ### Backend
-- **Framework**: FastAPI (Python 3.10+)
-- **ORM**: SQLAlchemy
+- **Framework**: FastAPI 0.104+ (Python 3.10+)
+- **Database**: PostgreSQL 15 with SQLAlchemy 2.0 (async)
+- **ORM**: SQLAlchemy 2.0 (async engine)
 - **Migration**: Alembic
-- **Async**: asyncio, asyncpg
-- **ML**: PyTorch
+- **ML**: PyTorch 2.1+
 - **LLM**: OpenAI API / LangChain
+- **WebSocket**: Native FastAPI WebSocket support
+- **Task Queue**: (Optional) Celery with Redis
 
 ### Infrastructure
 - **Database**: PostgreSQL 15
@@ -107,24 +111,66 @@ robot-ml-web-app/
 
 ```bash
 cd backend
+
+# Create virtual environment
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 
-# Run migrations
-alembic upgrade head
+# Configure environment variables
+cp .env.example .env
+# Edit .env with your configuration:
+# - DATABASE_URL (PostgreSQL connection string)
+# - MQTT_BROKER_HOST and MQTT_BROKER_PORT
+# - OPENAI_API_KEY (for chatbot functionality)
+# - CORS_ORIGINS (allowed frontend URLs)
+
+# Run database migrations (if applicable)
+# alembic upgrade head
 
 # Start development server
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+The backend API will be available at `http://localhost:8000`
+- API documentation: `http://localhost:8000/docs`
+- Alternative docs: `http://localhost:8000/redoc`
 
 #### Frontend Development
 
 ```bash
 cd frontend
+
+# Install dependencies
 npm install
+
+# Configure environment variables
+cp .env.example .env
+# Edit .env if needed:
+# - VITE_API_URL=http://localhost:8000
+# - VITE_WS_URL=ws://localhost:8000
+# - VITE_APP_TITLE=Robot ML Control System
+
+# Start development server with hot reload
 npm run dev
+```
+
+The frontend will be available at `http://localhost:5173`
+
+#### Frontend Commands
+
+```bash
+# Type checking
+npm run type-check
+
+# Build for production
+npm run build
+
+# Preview production build
+npm run preview
 ```
 
 ## 🎮 Usage

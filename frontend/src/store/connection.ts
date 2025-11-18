@@ -11,7 +11,7 @@ export const useConnectionStore = defineStore('connection', () => {
 
   function startMonitoring() {
     // Connect to connection monitor WebSocket
-    const wsUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000'
+    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000'
     ws.value = new WebSocket(`${wsUrl}/api/v1/ws/connection`)
 
     ws.value.onopen = () => {

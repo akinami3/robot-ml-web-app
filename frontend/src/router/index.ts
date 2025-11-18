@@ -1,8 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import RobotControlView from '../views/RobotControl/RobotControlView.vue'
-import DatabaseView from '../views/Database/DatabaseView.vue'
-import MLView from '../views/MachineLearning/MLView.vue'
-import ChatbotView from '../views/Chatbot/ChatbotView.vue'
+import RobotControlView from '../views/RobotControlView.vue'
+import DatabaseView from '../views/DatabaseView.vue'
+import MLView from '../views/MLView.vue'
+import ChatbotView from '../views/ChatbotView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
