@@ -30,7 +30,7 @@
 
 ## 🏗️ Technology Stack
 
-### Frontend (2つの実装を提供)
+### Frontend (3つの実装を提供)
 
 #### Vue.js版 (`frontend/`)
 - **Framework**: Vue 3.3.10 (Composition API + TypeScript)
@@ -41,7 +41,19 @@
 - **Joystick**: nipplejs 0.10.1
 - **Routing**: Vue Router 4.2.5
 
-#### Vanilla JS版 (`frontend-vanilla/`) ⭐ NEW!
+#### React版 (`frontend-react/`) ⚛️ NEW!
+- **Framework**: React 18.2 + TypeScript 5.2
+- **Build Tool**: Vite 5.0
+- **State Management**: Zustand 4.4
+- **HTTP Client**: Axios 1.6
+- **Visualization**: Chart.js 4.4 + react-chartjs-2
+- **Joystick**: nipplejs 0.10
+- **Routing**: React Router 6.20
+- 📦 **中サイズ** (~220KB)
+- ⚡ **高速HMR** (開発体験優秀)
+- 🔒 **完全な型安全性** (TypeScript)
+
+#### Vanilla JS版 (`frontend-vanilla/`) ⭐
 - **Framework**: なし（純粋なJavaScript）
 - **Build Tool**: 不要
 - **State Management**: カスタムストア
@@ -49,8 +61,8 @@
 - **Visualization**: Chart.js 4.4.0
 - **Joystick**: nipplejs 0.10.1
 - **Routing**: カスタムハッシュルーター
-- 📦 **軽量** (~180KB vs Vue版の ~450KB)
-- ⚡ **高速** (ビルド不要、初回ロード ~300ms)
+- 📦 **最軽量** (~180KB)
+- ⚡ **最速** (ビルド不要、初回ロード ~300ms)
 
 ### Backend
 - **Framework**: FastAPI 0.104+ (Python 3.10+)
@@ -73,7 +85,8 @@
 ```
 robot-ml-web-app/
 ├── frontend/          # Vue.js frontend (オリジナル)
-├── frontend-vanilla/  # Vanilla JS frontend (NEW! フレームワークレス)
+├── frontend-react/    # React + TypeScript frontend (NEW!)
+├── frontend-vanilla/  # Vanilla JS frontend (フレームワークレス)
 ├── backend/           # FastAPI backend
 ├── database/          # Database migrations & init scripts
 ├── mqtt-broker/       # MQTT broker configuration
@@ -93,13 +106,22 @@ robot-ml-web-app/
 - ✅ Web開発の基礎を学びたい
 - ✅ 依存関係を最小限にしたい
 
-**Vue.js版を選ぶ場合** (`frontend/`):
-- ✅ 大規模・複雑なアプリケーション
-- ✅ TypeScript統合が必要
-- ✅ 開発速度を優先
-- ✅ Vueエコシステムを活用したい
+**React版を選ぶ場合** (`frontend-react/`):
+- ✅ TypeScriptによる型安全性が必要
+- ✅ 大規模アプリケーション
+- ✅ Reactエコシステムを活用したい
+- ✅ 最高の開発体験（HMR、DevTools）
+- ✅ 就職・転職で有利なスキル
 
-詳細な比較: [frontend-vanilla/COMPARISON.md](./frontend-vanilla/COMPARISON.md)
+**Vue.js版を選ぶ場合** (`frontend/`):
+- ✅ 学習曲線が緩やかなフレームワーク
+- ✅ テンプレート構文が好み
+- ✅ Vueエコシステムを活用したい
+- ✅ 日本語ドキュメントが豊富
+
+詳細な比較: 
+- [frontend-vanilla/COMPARISON.md](./frontend-vanilla/COMPARISON.md)
+- [frontend-react/COMPARISON.md](./frontend-react/COMPARISON.md) (3つの実装を比較)
 
 詳細なディレクトリ構成は [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md) を参照してください.
 
@@ -133,6 +155,27 @@ robot-ml-web-app/
    - Backend API: http://localhost:8000/docs
 
 詳細: [frontend-vanilla/QUICK_START.md](./frontend-vanilla/QUICK_START.md)
+
+#### ⚛️ React版スタート
+
+1. **バックエンドを起動**
+   ```bash
+   cd backend
+   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+2. **フロントエンドを起動**
+   ```bash
+   cd frontend-react
+   npm install  # 初回のみ
+   npm run dev
+   ```
+
+3. **ブラウザで開く**
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:8000/docs
+
+詳細: [frontend-react/QUICK_START.md](./frontend-react/QUICK_START.md)
 
 #### 🎨 Vue.js版スタート
 
