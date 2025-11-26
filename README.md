@@ -30,7 +30,9 @@
 
 ## 🏗️ Technology Stack
 
-### Frontend
+### Frontend (2つの実装を提供)
+
+#### Vue.js版 (`frontend/`)
 - **Framework**: Vue 3.3.10 (Composition API + TypeScript)
 - **Build Tool**: Vite 5.0.8
 - **State Management**: Pinia 2.1.7
@@ -38,6 +40,17 @@
 - **Visualization**: Chart.js 4.4.0
 - **Joystick**: nipplejs 0.10.1
 - **Routing**: Vue Router 4.2.5
+
+#### Vanilla JS版 (`frontend-vanilla/`) ⭐ NEW!
+- **Framework**: なし（純粋なJavaScript）
+- **Build Tool**: 不要
+- **State Management**: カスタムストア
+- **HTTP Client**: Fetch API
+- **Visualization**: Chart.js 4.4.0
+- **Joystick**: nipplejs 0.10.1
+- **Routing**: カスタムハッシュルーター
+- 📦 **軽量** (~180KB vs Vue版の ~450KB)
+- ⚡ **高速** (ビルド不要、初回ロード ~300ms)
 
 ### Backend
 - **Framework**: FastAPI 0.104+ (Python 3.10+)
@@ -59,7 +72,8 @@
 
 ```
 robot-ml-web-app/
-├── frontend/          # Vue.js frontend
+├── frontend/          # Vue.js frontend (オリジナル)
+├── frontend-vanilla/  # Vanilla JS frontend (NEW! フレームワークレス)
 ├── backend/           # FastAPI backend
 ├── database/          # Database migrations & init scripts
 ├── mqtt-broker/       # MQTT broker configuration
@@ -71,17 +85,56 @@ robot-ml-web-app/
 └── scripts/           # Utility scripts
 ```
 
-詳細なディレクトリ構成は [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md) を参照してください。
+### 📌 フロントエンド選択ガイド
+
+**Vanilla JS版を選ぶ場合** (`frontend-vanilla/`):
+- ✅ 軽量・高速な実装が必要
+- ✅ ビルドツールを使いたくない
+- ✅ Web開発の基礎を学びたい
+- ✅ 依存関係を最小限にしたい
+
+**Vue.js版を選ぶ場合** (`frontend/`):
+- ✅ 大規模・複雑なアプリケーション
+- ✅ TypeScript統合が必要
+- ✅ 開発速度を優先
+- ✅ Vueエコシステムを活用したい
+
+詳細な比較: [frontend-vanilla/COMPARISON.md](./frontend-vanilla/COMPARISON.md)
+
+詳細なディレクトリ構成は [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md) を参照してください.
 
 ## 🛠️ Setup & Installation
 
 ### Prerequisites
 
-- Docker & Docker Compose
-- Node.js 18+ (for local frontend development)
-- Python 3.10+ (for local backend development)
+- Docker & Docker Compose (for full stack)
+- **Vanilla JS版**: Python 3.x のみ (超シンプル!)
+- **Vue.js版**: Node.js 18+ 
+- Python 3.10+ (for backend development)
 
 ### Quick Start
+
+#### 🚀 最速スタート (Vanilla JS版)
+
+1. **バックエンドを起動**
+   ```bash
+   cd backend
+   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+2. **フロントエンドを起動**
+   ```bash
+   cd frontend-vanilla
+   ./serve.sh
+   ```
+
+3. **ブラウザで開く**
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:8000/docs
+
+詳細: [frontend-vanilla/QUICK_START.md](./frontend-vanilla/QUICK_START.md)
+
+#### 🎨 Vue.js版スタート
 
 1. **Clone the repository**
    ```bash

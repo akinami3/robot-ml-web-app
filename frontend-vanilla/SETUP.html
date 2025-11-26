@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot ML Web Application - Setup</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #2563eb; }
+        h2 { color: #374151; margin-top: 30px; }
+        .step {
+            background: #f9fafb;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #2563eb;
+        }
+        code {
+            background: #1f2937;
+            color: #10b981;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .command {
+            background: #1f2937;
+            color: #10b981;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+        .success { color: #10b981; }
+        .warning { color: #f59e0b; }
+        ul { margin-left: 20px; }
+        li { margin: 8px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Robot ML Web Application - Vanilla JS Setup</h1>
+        
+        <p>Welcome! This guide will help you set up and run the Vanilla JavaScript version of the Robot ML Web Application.</p>
+
+        <h2>📋 Prerequisites</h2>
+        <ul>
+            <li>Backend API running on <code>http://localhost:8000</code></li>
+            <li>Python 3.x installed (for simple HTTP server)</li>
+        </ul>
+
+        <h2>🛠️ Quick Start</h2>
+        
+        <div class="step">
+            <h3>Step 1: Navigate to the frontend directory</h3>
+            <div class="command">cd frontend-vanilla</div>
+        </div>
+
+        <div class="step">
+            <h3>Step 2: Start the HTTP server</h3>
+            <p><strong>Option A: Using the serve script</strong></p>
+            <div class="command">./serve.sh</div>
+            
+            <p><strong>Option B: Using Python directly</strong></p>
+            <div class="command">python3 -m http.server 3000</div>
+            
+            <p><strong>Option C: Using Node.js</strong></p>
+            <div class="command">npx http-server -p 3000 -c-1</div>
+        </div>
+
+        <div class="step">
+            <h3>Step 3: Open in browser</h3>
+            <p>Navigate to: <a href="http://localhost:3000" target="_blank">http://localhost:3000</a></p>
+        </div>
+
+        <h2>⚙️ Configuration</h2>
+        <p>Edit <code>js/config.js</code> if your backend is running on a different host/port:</p>
+        <div class="command">
+export const config = {
+    apiUrl: 'http://localhost:8000',
+    wsUrl: 'ws://localhost:8000',
+};
+        </div>
+
+        <h2>📱 Features</h2>
+        <ul>
+            <li><strong>ロボット制御</strong> - Real-time robot control with joystick</li>
+            <li><strong>データベース</strong> - Record and manage robot data</li>
+            <li><strong>機械学習</strong> - Train ML models with live progress</li>
+            <li><strong>チャットボット</strong> - RAG-based Q&A system</li>
+        </ul>
+
+        <h2>🐛 Troubleshooting</h2>
+        
+        <div class="step">
+            <h3>Issue: Cannot connect to backend</h3>
+            <p><strong>Solution:</strong></p>
+            <ul>
+                <li>Make sure backend is running on <code>http://localhost:8000</code></li>
+                <li>Check CORS settings in backend</li>
+                <li>Update <code>js/config.js</code> with correct backend URL</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <h3>Issue: WebSocket connection failed</h3>
+            <p><strong>Solution:</strong></p>
+            <ul>
+                <li>Verify WebSocket URL in <code>js/config.js</code></li>
+                <li>Check backend WebSocket endpoint is running</li>
+                <li>Look for CORS or firewall issues</li>
+            </ul>
+        </div>
+
+        <div class="step">
+            <h3>Issue: External libraries not loading</h3>
+            <p><strong>Solution:</strong></p>
+            <ul>
+                <li>Check internet connection (libraries loaded from CDN)</li>
+                <li>Open browser console to see specific errors</li>
+                <li>Consider downloading libraries locally if needed</li>
+            </ul>
+        </div>
+
+        <h2>📚 Documentation</h2>
+        <ul>
+            <li><a href="README.md">README.md</a> - Full documentation</li>
+            <li><a href="COMPARISON.md">COMPARISON.md</a> - Vue vs Vanilla JS comparison</li>
+        </ul>
+
+        <h2>✨ Tips</h2>
+        <ul>
+            <li>Open browser DevTools (F12) to see console logs and debug</li>
+            <li>Check Network tab to verify API calls</li>
+            <li>All state is managed manually - check DOM updates if something doesn't appear</li>
+            <li>The app uses hash-based routing (#robot-control, #database, etc.)</li>
+        </ul>
+
+        <hr style="margin: 30px 0;">
+        
+        <p style="text-align: center; color: #6b7280;">
+            <strong>Ready to start?</strong><br>
+            Run <code>./serve.sh</code> and open <a href="http://localhost:3000">http://localhost:3000</a>
+        </p>
+    </div>
+</body>
+</html>
