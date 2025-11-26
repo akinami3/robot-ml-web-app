@@ -52,7 +52,7 @@ const RobotControlView = () => {
         size: 150,
       })
 
-      manager.on('move', (evt: any, data: any) => {
+      manager.on('move', (_evt: any, data: any) => {
         const force = data.force
         const angle = data.angle.radian
         const vx = Math.cos(angle) * force

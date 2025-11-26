@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { config } from '../config'
+import { config as appConfig } from '../config'
 import api from '../services/api'
 import { Chart, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js'
 import { Line } from 'react-chartjs-2'
@@ -15,7 +15,7 @@ const MLView = () => {
     trainLoss: [] as number[],
     valLoss: [] as number[],
   })
-  const [config, setConfig] = useState({
+  const [mlConfig, setMlConfig] = useState({
     dataset: 'dataset1',
     modelType: 'cnn',
     batchSize: 32,
@@ -28,7 +28,7 @@ const MLView = () => {
 
   useEffect(() => {
     if (isTraining && !wsRef.current) {
-      const wsUrl = `${config.wsUrl}/api/v1/ws/ml`
+      const wsUrl = `${appConfig.wsUrl}/api/v1/ws/ml`
       const ws = new WebSocket(wsUrl)
 
       ws.onmessage = (event) => {
@@ -59,12 +59,12 @@ const MLView = () => {
   const handleStartTraining = async () => {
     try {
       await api.post('/api/v1/ml/training/start', {
-        dataset: config.dataset,
-        model_type: config.modelType,
-        batch_size: config.batchSize,
-        epochs: config.epochs,
-        learning_rate: config.learningRate,
-        optimizer: config.optimizer,
+        dataset: mlConfig.dataset,
+        model_type: mlConfig.modelType,
+        batch_size: mlConfig.batchSize,
+        epochs: mlConfig.epochs,
+        learning_rate: mlConfig.learningRate,
+        optimizer: mlConfig.optimizer,
       })
       setIsTraining(true)
       setTrainingData({ epochs: [], trainLoss: [], valLoss: [] })
@@ -147,8 +147,8 @@ const MLView = () => {
             <label>Dataset</label>
             <select
               className="input"
-              value={config.dataset}
-              onChange={(e) => setConfig({...config, dataset: e.target.value})}
+              value={mlConfig.dataset}
+              onChange={(e) => setMlConfig({...mlConfig, dataset: e.target.value})}
               disabled={isTraining}
             >
               <option value="dataset1">Dataset 1</option>
@@ -160,8 +160,8 @@ const MLView = () => {
             <label>Model Type</label>
             <select
               className="input"
-              value={config.modelType}
-              onChange={(e) => setConfig({...config, modelType: e.target.value})}
+              value={mlConfig.modelType}
+              onChange={(e) => setMlConfig({...mlConfig, modelType: e.target.value})}
               disabled={isTraining}
             >
               <option value="cnn">CNN</option>
@@ -175,8 +175,8 @@ const MLView = () => {
             <input
               type="number"
               className="input"
-              value={config.batchSize}
-              onChange={(e) => setConfig({...config, batchSize: parseInt(e.target.value)})}
+              value={mlConfig.batchSize}
+              onChange={(e) => setMlConfig({...mlConfig, batchSize: parseInt(e.target.value)})}
               disabled={isTraining}
               min="1"
             />
@@ -187,8 +187,8 @@ const MLView = () => {
             <input
               type="number"
               className="input"
-              value={config.epochs}
-              onChange={(e) => setConfig({...config, epochs: parseInt(e.target.value)})}
+              value={mlConfig.epochs}
+              onChange={(e) => setMlConfig({...mlConfig, epochs: parseInt(e.target.value)})}
               disabled={isTraining}
               min="1"
             />
@@ -199,8 +199,8 @@ const MLView = () => {
             <input
               type="number"
               className="input"
-              value={config.learningRate}
-              onChange={(e) => setConfig({...config, learningRate: parseFloat(e.target.value)})}
+              value={mlConfig.learningRate}
+              onChange={(e) => setMlConfig({...mlConfig, learningRate: parseFloat(e.target.value)})}
               disabled={isTraining}
               step="0.0001"
             />
@@ -210,8 +210,8 @@ const MLView = () => {
             <label>Optimizer</label>
             <select
               className="input"
-              value={config.optimizer}
-              onChange={(e) => setConfig({...config, optimizer: e.target.value})}
+              value={mlConfig.optimizer}
+              onChange={(e) => setMlConfig({...mlConfig, optimizer: e.target.value})}
               disabled={isTraining}
             >
               <option value="adam">Adam</option>
