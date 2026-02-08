@@ -64,6 +64,252 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### クラス図
+
+```mermaid
+classDiagram
+    direction TB
+    
+    %% Frontend Layer
+    class Frontend {
+        +Dashboard
+        +RobotList
+        +MissionPanel
+        +useWebSocket()
+    }
+    
+    %% Backend Layer
+    class Backend {
+        +FastAPI app
+        +handle_request()
+        +broadcast_event()
+    }
+    
+    class AuthService {
+        +login(credentials)
+        +verify_token(token)
+        +refresh_token()
+    }
+    
+    class RobotService {
+        +get_robots()
+        +get_robot(id)
+        +update_robot_status()
+    }
+    
+    class MissionService {
+        +create_mission()
+        +assign_robot()
+        +update_progress()
+    }
+    
+    class GRPCClient {
+        +stream_robot_status()
+        +send_command()
+        +start_mission()
+        +cancel_mission()
+    }
+    
+    %% Gateway Layer
+    class FleetGateway {
+        +gRPC Server
+        +StreamRobotStatus()
+        +SendCommand()
+        +StartMission()
+    }
+    
+    class RobotManager {
+        -robots Map
+        +RegisterRobot()
+        +GetRobot()
+        +UpdateStatus()
+    }
+    
+    class StateMachine {
+        -currentState State
+        +Transition(event)
+        +GetState()
+    }
+    
+    class MQTTClient {
+        +Subscribe(topic)
+        +Publish(topic, message)
+        +handleMessage()
+    }
+    
+    class RobotAdapter {
+        <<interface>>
+        +ParseStatus(payload)
+        +FormatCommand(cmd)
+    }
+    
+    class MiRAdapter {
+        +ParseStatus(payload)
+        +FormatCommand(cmd)
+    }
+    
+    class CustomAdapter {
+        +ParseStatus(payload)
+        +FormatCommand(cmd)
+    }
+    
+    %% Database
+    class PostgreSQL {
+        +robots table
+        +missions table
+        +users table
+    }
+    
+    class Redis {
+        +cache
+        +session
+    }
+    
+    %% Relationships
+    Frontend --> Backend : REST/WebSocket
+    Backend --> AuthService
+    Backend --> RobotService
+    Backend --> MissionService
+    Backend --> GRPCClient
+    Backend --> PostgreSQL
+    Backend --> Redis
+    
+    GRPCClient --> FleetGateway : gRPC
+    
+    FleetGateway --> RobotManager
+    FleetGateway --> MQTTClient
+    RobotManager --> StateMachine
+    
+    MQTTClient --> RobotAdapter
+    RobotAdapter <|.. MiRAdapter
+    RobotAdapter <|.. CustomAdapter
+```
+
+### シーケンス図
+
+#### ロボットへのコマンド送信フロー
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant F as Frontend
+    participant B as Backend (FastAPI)
+    participant G as Gateway (Go)
+    participant M as MQTT Broker
+    participant R as Robot
+
+    U->>F: コマンド実行ボタンクリック
+    F->>B: POST /api/v1/robots/{id}/command
+    
+    Note over B: 認証・認可チェック
+    B->>B: JWT検証
+    
+    B->>G: gRPC SendCommand()
+    
+    Note over G: コマンドをロボット形式に変換
+    G->>G: Adapter.FormatCommand()
+    
+    G->>M: Publish fleet/{robot_id}/command
+    M->>R: コマンド配信
+    
+    R->>M: Publish fleet/{robot_id}/status
+    M->>G: ステータス受信
+    
+    Note over G: ステータスをパース
+    G->>G: Adapter.ParseStatus()
+    G->>G: StateMachine.Transition()
+    
+    G-->>B: gRPC StreamRobotStatus()
+    B-->>F: WebSocket ステータス更新
+    F-->>U: UI更新（リアルタイム）
+```
+
+#### ミッション実行フロー
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant F as Frontend
+    participant B as Backend
+    participant DB as PostgreSQL
+    participant G as Gateway
+    participant M as MQTT Broker
+    participant R as Robot
+
+    U->>F: ミッション作成
+    F->>B: POST /api/v1/missions
+    B->>DB: INSERT mission
+    B-->>F: mission_id
+    
+    U->>F: ロボット割り当て
+    F->>B: POST /api/v1/missions/{id}/assign
+    B->>DB: UPDATE mission (robot_id)
+    
+    B->>G: gRPC StartMission()
+    G->>G: RobotManager.GetRobot()
+    G->>G: StateMachine.Transition(MISSION_START)
+    
+    G->>M: Publish fleet/{robot_id}/mission
+    M->>R: ミッション開始
+    
+    loop ミッション実行中
+        R->>M: Publish fleet/{robot_id}/status
+        M->>G: ステータス受信
+        G->>G: ステータス更新
+        G-->>B: gRPC StreamRobotStatus()
+        B->>DB: UPDATE mission (progress)
+        B-->>F: WebSocket 進捗更新
+        F-->>U: プログレスバー更新
+    end
+    
+    R->>M: ミッション完了通知
+    M->>G: 完了ステータス
+    G->>G: StateMachine.Transition(MISSION_COMPLETE)
+    G-->>B: ミッション完了
+    B->>DB: UPDATE mission (status=completed)
+    B-->>F: WebSocket 完了通知
+    F-->>U: 完了表示
+```
+
+#### 認証フロー
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant F as Frontend
+    participant B as Backend
+    participant DB as PostgreSQL
+    participant R as Redis
+
+    U->>F: ログイン情報入力
+    F->>B: POST /api/v1/auth/login
+    
+    B->>DB: SELECT user WHERE email=?
+    DB-->>B: user record
+    
+    B->>B: パスワード検証 (bcrypt)
+    
+    alt 認証成功
+        B->>B: JWT生成 (access + refresh)
+        B->>R: セッション保存
+        B-->>F: {access_token, refresh_token}
+        F->>F: LocalStorageに保存
+        F-->>U: ダッシュボードへリダイレクト
+    else 認証失敗
+        B-->>F: 401 Unauthorized
+        F-->>U: エラーメッセージ表示
+    end
+    
+    Note over F,B: 以降のAPIリクエスト
+    F->>B: GET /api/v1/robots (Authorization: Bearer token)
+    B->>B: JWT検証
+    B->>R: セッション確認
+    B-->>F: ロボット一覧
+```
+
 ## 📦 必要要件
 
 ### ローカル開発
