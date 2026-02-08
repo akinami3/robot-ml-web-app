@@ -1,100 +1,129 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
+  # ===========================================
+  # Infrastructure Services
+  # ===========================================
+  
   postgres:
     image: postgres:15-alpine
-    container_name: robot-ml-postgres
+    container_name: amr-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-robot_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-robot_password}
-      POSTGRES_DB: ${POSTGRES_DB:-robot_ml_db}
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-amr_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-amr_password}
+      POSTGRES_DB: ${POSTGRES_DB:-amr_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
-    networks:
-      - robot-ml-network
+    ports:
+      - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-robot_user}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-amr_user} -d ${POSTGRES_DB:-amr_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - amr-network
 
-  # MQTT Broker (Mosquitto)
-  mqtt-broker:
-    image: eclipse-mosquitto:2.0
-    container_name: robot-ml-mqtt
+  redis:
+    image: redis:7-alpine
+    container_name: amr-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - amr-network
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: amr-mosquitto
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
     ports:
       - "1883:1883"
       - "9001:9001"
-    volumes:
-      - ./mqtt-broker/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - mqtt_data:/mosquitto/data
-      - mqtt_logs:/mosquitto/log
     networks:
-      - robot-ml-network
-    healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck -W 3"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - amr-network
 
-  # Backend (FastAPI)
+  # ===========================================
+  # Application Services
+  # ===========================================
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: robot-ml-backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    container_name: amr-backend
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://amr_user:amr_password@postgres:5432/amr_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-this-in-production}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
+      GATEWAY_URL: ${GATEWAY_URL:-http://gateway:8081}
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend:/app
-      - ./data:/app/data
-      - ./logs:/app/logs
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-mqtt-broker}
-      - MQTT_BROKER_PORT=${MQTT_BROKER_PORT:-1883}
-      - MQTT_USERNAME=${MQTT_USERNAME}
-      - MQTT_PASSWORD=${MQTT_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
-      mqtt-broker:
+      redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
-      - robot-ml-network
-    restart: unless-stopped
+      - amr-network
 
-  # Frontend (Vue.js)
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: amr-gateway
+    environment:
+      MQTT_BROKER: ${MQTT_BROKER:-tcp://mosquitto:1883}
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-amr-gateway}
+      BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
+      PORT: "8081"
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mosquitto
+      - backend
+    networks:
+      - amr-network
+
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: robot-ml-frontend
-    command: npm run dev
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: amr-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    environment:
-      - VITE_API_BASE_URL=http://localhost:8000
-      - VITE_WS_BASE_URL=ws://localhost:8000
     depends_on:
       - backend
     networks:
-      - robot-ml-network
-    restart: unless-stopped
-
-networks:
-  robot-ml-network:
-    driver: bridge
+      - amr-network
 
 volumes:
   postgres_data:
-  mqtt_data:
-  mqtt_logs:
+  redis_data:
+  mosquitto_data:
+  mosquitto_log:
+
+networks:
+  amr-network:
+    driver: bridge

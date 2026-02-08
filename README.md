@@ -1,371 +1,489 @@
-# Robot ML Web Application
+# AMR SaaS Platform
 
-ロボット制御、データ収集、機械学習、チャットボットを統合したWebアプリケーション
+自律移動ロボット（AMR）のフリート管理を行うSaaSプラットフォームです。
 
-## 🚀 Features
+## 📋 目次
 
-### 🤖 ロボット制御
-- リアルタイムジョイスティック制御
-- カメラフィード表示
-- ロボットステータス監視
-- ナビゲーション機能
-- Unity/実機の切り替え対応
+- [システム概要](#システム概要)
+- [アーキテクチャ](#アーキテクチャ)
+- [必要要件](#必要要件)
+- [環境構築](#環境構築)
+- [起動方法](#起動方法)
+- [操作方法](#操作方法)
+- [API仕様](#api仕様)
+- [開発ガイド](#開発ガイド)
 
-### 💾 データベース画面
-- ロボットデータのリアルタイム記録
-- 選択的データ保存（チェックボックス）
-- 画像の効率的な保存（ファイルシステム）
-- 記録制御（開始/一時停止/保存/破棄/終了）
+## 📖 システム概要
 
-### 🧠 機械学習
-- PyTorchによる学習パイプライン
-- リアルタイム学習曲線表示
-- データセット管理
-- モデル評価機能
+### 主な機能
 
-### 💬 チャットボット
-- RAG（Retrieval-Augmented Generation）
-- LLM統合
-- Webアプリに関するQA機能
+- **ロボット管理**: ロボットの登録・削除・状態監視
+- **ミッション管理**: タスクの作成・割り当て・進捗追跡
+- **リアルタイム監視**: WebSocket/MQTTによる状態更新
+- **マルチベンダー対応**: Adapterパターンによる異なるメーカーのロボット統合
+- **認証・認可**: JWT認証とRBACによるアクセス制御
 
-## 🏗️ Technology Stack
+### 技術スタック
 
-### Frontend (3つの実装を提供)
+| コンポーネント | 技術 |
+|--------------|------|
+| Backend | Python 3.11, FastAPI 0.109, SQLAlchemy 2.0 |
+| Gateway | Go 1.21, Gin, MQTT |
+| Frontend | Next.js 14, React 18, TypeScript, TanStack Query |
+| Database | PostgreSQL 15, Redis 7 |
+| Message Broker | Eclipse Mosquitto (MQTT) |
+| Container | Docker, Docker Compose |
 
-#### Vue.js版 (`frontend/`)
-- **Framework**: Vue 3.3.10 (Composition API + TypeScript)
-- **Build Tool**: Vite 5.0.8
-- **State Management**: Pinia 2.1.7
-- **HTTP Client**: Axios 1.6.2
-- **Visualization**: Chart.js 4.4.0
-- **Joystick**: nipplejs 0.10.1
-- **Routing**: Vue Router 4.2.5
-
-#### React版 (`frontend-react/`) ⚛️ NEW!
-- **Framework**: React 18.2 + TypeScript 5.2
-- **Build Tool**: Vite 5.0
-- **State Management**: Zustand 4.4
-- **HTTP Client**: Axios 1.6
-- **Visualization**: Chart.js 4.4 + react-chartjs-2
-- **Joystick**: nipplejs 0.10
-- **Routing**: React Router 6.20
-- 📦 **中サイズ** (~220KB)
-- ⚡ **高速HMR** (開発体験優秀)
-- 🔒 **完全な型安全性** (TypeScript)
-
-#### Vanilla JS版 (`frontend-vanilla/`) ⭐
-- **Framework**: なし（純粋なJavaScript）
-- **Build Tool**: 不要
-- **State Management**: カスタムストア
-- **HTTP Client**: Fetch API
-- **Visualization**: Chart.js 4.4.0
-- **Joystick**: nipplejs 0.10.1
-- **Routing**: カスタムハッシュルーター
-- 📦 **最軽量** (~180KB)
-- ⚡ **最速** (ビルド不要、初回ロード ~300ms)
-
-### Backend
-- **Framework**: FastAPI 0.104+ (Python 3.10+)
-- **Database**: PostgreSQL 15 with SQLAlchemy 2.0 (async)
-- **ORM**: SQLAlchemy 2.0 (async engine)
-- **Migration**: Alembic
-- **ML**: PyTorch 2.1+
-- **LLM**: OpenAI API / LangChain
-- **WebSocket**: Native FastAPI WebSocket support
-- **Task Queue**: (Optional) Celery with Redis
-
-### Infrastructure
-- **Database**: PostgreSQL 15
-- **Message Broker**: Eclipse Mosquitto (MQTT)
-- **Containerization**: Docker & Docker Compose
-- **Communication**: WebSocket, MQTT, REST API
-
-## 📁 Project Structure
+## 🏗️ アーキテクチャ
 
 ```
-robot-ml-web-app/
-├── frontend/          # Vue.js frontend (オリジナル)
-├── frontend-react/    # React + TypeScript frontend (NEW!)
-├── frontend-vanilla/  # Vanilla JS frontend (フレームワークレス)
-├── backend/           # FastAPI backend
-├── database/          # Database migrations & init scripts
-├── mqtt-broker/       # MQTT broker configuration
-├── unity-simulator/   # Unity simulator (optional)
-├── data/              # Data storage
-├── logs/              # Application logs
-├── docs/              # Documentation
-├── tests/             # Tests
-└── scripts/           # Utility scripts
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend                              │
+│                   (Next.js + React)                          │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ REST API / WebSocket
+┌─────────────────────────▼───────────────────────────────────┐
+│                        Backend                               │
+│                       (FastAPI)                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+│  │   Auth   │  │  Robots  │  │ Missions │  │   Logs   │    │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ REST API
+┌─────────────────────────▼───────────────────────────────────┐
+│                     Fleet Gateway                            │
+│                        (Go/Gin)                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                   │
+│  │   FSM    │  │ Adapters │  │   MQTT   │                   │
+│  └──────────┘  └──────────┘  └──────────┘                   │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ MQTT
+┌─────────────────────────▼───────────────────────────────────┐
+│                        Robots                                │
+│           (Various Vendors via Adapter Pattern)              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 📌 フロントエンド選択ガイド
+## 📦 必要要件
 
-**Vanilla JS版を選ぶ場合** (`frontend-vanilla/`):
-- ✅ 軽量・高速な実装が必要
-- ✅ ビルドツールを使いたくない
-- ✅ Web開発の基礎を学びたい
-- ✅ 依存関係を最小限にしたい
+### ローカル開発
 
-**React版を選ぶ場合** (`frontend-react/`):
-- ✅ TypeScriptによる型安全性が必要
-- ✅ 大規模アプリケーション
-- ✅ Reactエコシステムを活用したい
-- ✅ 最高の開発体験（HMR、DevTools）
-- ✅ 就職・転職で有利なスキル
+- Docker 24.0+
+- Docker Compose 2.20+
+- Git
 
-**Vue.js版を選ぶ場合** (`frontend/`):
-- ✅ 学習曲線が緩やかなフレームワーク
-- ✅ テンプレート構文が好み
-- ✅ Vueエコシステムを活用したい
-- ✅ 日本語ドキュメントが豊富
+### 個別開発（Dockerを使わない場合）
 
-詳細な比較: 
-- [frontend-vanilla/COMPARISON.md](./frontend-vanilla/COMPARISON.md)
-- [frontend-react/COMPARISON.md](./frontend-react/COMPARISON.md) (3つの実装を比較)
+- Python 3.11+
+- Go 1.21+
+- Node.js 20+
+- PostgreSQL 15+
+- Redis 7+
+- Mosquitto (MQTT Broker)
 
-詳細なディレクトリ構成は [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md) を参照してください.
+## 🚀 環境構築
 
-## 🛠️ Setup & Installation
+### 1. リポジトリのクローン
 
-### Prerequisites
+```bash
+git clone https://github.com/your-org/amr-saas-platform.git
+cd amr-saas-platform
+```
 
-- Docker & Docker Compose (for full stack)
-- **Vanilla JS版**: Python 3.x のみ (超シンプル!)
-- **Vue.js版**: Node.js 18+ 
-- Python 3.10+ (for backend development)
+### 2. 環境変数の設定
 
-### Quick Start
+```bash
+# 環境変数ファイルを作成
+cp .env.example .env
 
-#### 🚀 最速スタート (Vanilla JS版)
+# 必要に応じて編集
+vim .env
+```
 
-1. **バックエンドを起動**
-   ```bash
-   cd backend
-   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
+**.env ファイルの例:**
 
-2. **フロントエンドを起動**
-   ```bash
-   cd frontend-vanilla
-   ./serve.sh
-   ```
+```env
+# Database
+POSTGRES_USER=amr_user
+POSTGRES_PASSWORD=amr_password
+POSTGRES_DB=amr_db
+DATABASE_URL=postgresql+asyncpg://amr_user:amr_password@postgres:5432/amr_db
 
-3. **ブラウザで開く**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8000/docs
+# Redis
+REDIS_URL=redis://redis:6379/0
 
-詳細: [frontend-vanilla/QUICK_START.md](./frontend-vanilla/QUICK_START.md)
+# JWT
+JWT_SECRET_KEY=your-super-secret-key-change-in-production
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=1440
 
-#### ⚛️ React版スタート
+# MQTT
+MQTT_BROKER=mqtt://mosquitto:1883
 
-1. **バックエンドを起動**
-   ```bash
-   cd backend
-   python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
+# Gateway
+GATEWAY_URL=http://gateway:8081
 
-2. **フロントエンドを起動**
-   ```bash
-   cd frontend-react
-   npm install  # 初回のみ
-   npm run dev
-   ```
+# Frontend
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
 
-3. **ブラウザで開く**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8000/docs
+### 3. Docker Composeでの起動
 
-詳細: [frontend-react/QUICK_START.md](./frontend-react/QUICK_START.md)
+```bash
+# 全サービスをビルド・起動
+docker-compose up -d --build
 
-#### 🎨 Vue.js版スタート
+# ログの確認
+docker-compose logs -f
+```
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/akinami3/robot-ml-web-app.git
-   cd robot-ml-web-app
-   ```
+### 4. 個別サービスの起動（開発用）
 
-2. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-3. **Start all services with Docker Compose**
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **Access the application**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8000
-   - API Documentation: http://localhost:8000/docs
-
-### Development Setup
-
-#### Backend Development
+#### Backend (FastAPI)
 
 ```bash
 cd backend
 
-# Create virtual environment
+# 仮想環境の作成
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Linux/Mac
+# または
+.\venv\Scripts\activate  # Windows
 
-# Install dependencies
+# 依存関係のインストール
 pip install -r requirements.txt
-pip install -r requirements-dev.txt
 
-# Configure environment variables
-cp .env.example .env
-# Edit .env with your configuration:
-# - DATABASE_URL (PostgreSQL connection string)
-# - MQTT_BROKER_HOST and MQTT_BROKER_PORT
-# - OPENAI_API_KEY (for chatbot functionality)
-# - CORS_ORIGINS (allowed frontend URLs)
+# 環境変数の設定
+export DATABASE_URL="postgresql+asyncpg://amr_user:amr_password@localhost:5432/amr_db"
+export REDIS_URL="redis://localhost:6379/0"
+export JWT_SECRET_KEY="your-secret-key"
 
-# Run database migrations (if applicable)
-# alembic upgrade head
-
-# Start development server
+# サーバー起動
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The backend API will be available at `http://localhost:8000`
-- API documentation: `http://localhost:8000/docs`
-- Alternative docs: `http://localhost:8000/redoc`
+#### Gateway (Go)
 
-#### Frontend Development
+```bash
+cd gateway
+
+# 依存関係のダウンロード
+go mod download
+
+# 環境変数の設定
+export MQTT_BROKER="tcp://localhost:1883"
+export BACKEND_URL="http://localhost:8000"
+
+# サーバー起動
+go run cmd/gateway/main.go
+```
+
+#### Frontend (Next.js)
 
 ```bash
 cd frontend
 
-# Install dependencies
+# 依存関係のインストール
 npm install
 
-# Configure environment variables
-cp .env.example .env
-# Edit .env if needed:
-# - VITE_API_URL=http://localhost:8000
-# - VITE_WS_URL=ws://localhost:8000
-# - VITE_APP_TITLE=Robot ML Control System
+# 環境変数の設定
+echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
 
-# Start development server with hot reload
+# 開発サーバー起動
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:5173`
+## 🎮 起動方法
 
-#### Frontend Commands
+### Docker Compose（推奨）
 
 ```bash
-# Type checking
-npm run type-check
+# 全サービス起動
+docker-compose up -d
 
-# Build for production
-npm run build
+# 特定のサービスのみ起動
+docker-compose up -d postgres redis mosquitto  # インフラのみ
+docker-compose up -d backend                    # バックエンドのみ
 
-# Preview production build
-npm run preview
+# サービス停止
+docker-compose down
+
+# データを含めて完全削除
+docker-compose down -v
 ```
 
-## 🎮 Usage
+### 起動確認
 
-### Starting the Simulator
+| サービス | URL | 説明 |
+|---------|-----|------|
+| Frontend | http://localhost:3000 | Web UI |
+| Backend API | http://localhost:8000 | REST API |
+| API Docs | http://localhost:8000/docs | Swagger UI |
+| Gateway | http://localhost:8081 | Fleet Gateway |
+| PostgreSQL | localhost:5432 | Database |
+| Redis | localhost:6379 | Cache |
+| Mosquitto | localhost:1883 | MQTT Broker |
 
-1. ヘッダーの「シミュレーション起動」ボタンをクリック
-2. Unity シミュレータが起動します
-3. MQTT接続状態がヘッダーアイコンで確認できます
+## 📱 操作方法
 
-### Recording Robot Data
+### 1. 初期セットアップ
 
-1. **データベース**タブに移動
-2. 記録するデータ種別を選択（チェックボックス）
-3. 「開始」ボタンで記録開始
-4. 「一時停止」で中断、「保存」で確定
+#### ユーザー登録
 
-### Training ML Models
-
-1. **機械学習**タブに移動
-2. データセットを選択
-3. モデル設定を調整
-4. 「トレーニング開始」
-5. リアルタイムで学習曲線が表示されます
-
-### Using Chatbot
-
-1. **Chatbot**タブに移動
-2. 質問を入力
-3. RAGベースのAIが回答します
-
-## 🔌 API Documentation
-
-FastAPI の自動生成ドキュメントが利用可能です：
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
-詳細な API 仕様は [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md#8-api-エンドポイント設計) を参照してください。
-
-## 🧪 Testing
-
-### Backend Tests
 ```bash
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@example.com",
+    "password": "password123"
+  }'
+```
+
+#### ログイン
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin@example.com&password=password123"
+```
+
+レスポンス例:
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+### 2. ロボット管理
+
+#### ロボット登録
+
+```bash
+TOKEN="your-access-token"
+
+curl -X POST http://localhost:8000/api/v1/robots \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "AMR-001",
+    "serial_number": "SN-2024-001",
+    "model": "Navigator X1",
+    "vendor": "RobotCorp"
+  }'
+```
+
+#### ロボット一覧取得
+
+```bash
+curl -X GET http://localhost:8000/api/v1/robots \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### ロボットにコマンド送信
+
+```bash
+curl -X POST http://localhost:8000/api/v1/robots/1/command \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "navigate",
+    "payload": {
+      "destination": {"x": 10.0, "y": 5.0},
+      "speed": 0.5
+    }
+  }'
+```
+
+### 3. ミッション管理
+
+#### ミッション作成
+
+```bash
+curl -X POST http://localhost:8000/api/v1/missions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "配送タスク #1",
+    "description": "A地点からB地点への荷物配送",
+    "robot_id": 1,
+    "priority": 1,
+    "waypoints": [
+      {"x": 0, "y": 0, "action": "pickup"},
+      {"x": 10, "y": 5, "action": "dropoff"}
+    ]
+  }'
+```
+
+#### ミッション一覧取得
+
+```bash
+curl -X GET http://localhost:8000/api/v1/missions \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 4. Web UIでの操作
+
+1. ブラウザで http://localhost:3000 にアクセス
+2. ログイン画面でメールアドレスとパスワードを入力
+3. ダッシュボードでシステム全体の状態を確認
+4. 「Robots」メニューでロボットの追加・管理
+5. 「Missions」メニューでミッションの作成・監視
+
+## 📚 API仕様
+
+### 認証エンドポイント
+
+| Method | Endpoint | 説明 |
+|--------|----------|------|
+| POST | /api/v1/auth/register | ユーザー登録 |
+| POST | /api/v1/auth/login | ログイン（トークン取得） |
+| GET | /api/v1/auth/me | 現在のユーザー情報 |
+
+### ロボットエンドポイント
+
+| Method | Endpoint | 説明 |
+|--------|----------|------|
+| GET | /api/v1/robots | ロボット一覧 |
+| POST | /api/v1/robots | ロボット登録 |
+| GET | /api/v1/robots/{id} | ロボット詳細 |
+| PUT | /api/v1/robots/{id} | ロボット更新 |
+| DELETE | /api/v1/robots/{id} | ロボット削除 |
+| POST | /api/v1/robots/{id}/command | コマンド送信 |
+
+### ミッションエンドポイント
+
+| Method | Endpoint | 説明 |
+|--------|----------|------|
+| GET | /api/v1/missions | ミッション一覧 |
+| POST | /api/v1/missions | ミッション作成 |
+| GET | /api/v1/missions/{id} | ミッション詳細 |
+| PUT | /api/v1/missions/{id} | ミッション更新 |
+| DELETE | /api/v1/missions/{id} | ミッション削除 |
+
+詳細なAPI仕様は http://localhost:8000/docs (Swagger UI) で確認できます。
+
+## 🛠️ 開発ガイド
+
+### プロジェクト構造
+
+```
+amr-saas-platform/
+├── backend/                 # FastAPI バックエンド
+│   ├── app/
+│   │   ├── auth/           # 認証モジュール
+│   │   ├── models/         # SQLAlchemy モデル
+│   │   ├── routers/        # APIエンドポイント
+│   │   ├── schemas/        # Pydantic スキーマ
+│   │   ├── services/       # ビジネスロジック
+│   │   ├── config.py       # 設定
+│   │   ├── database.py     # DB接続
+│   │   └── main.py         # アプリケーション
+│   ├── requirements.txt
+│   └── Dockerfile
+├── gateway/                 # Go Fleet Gateway
+│   ├── cmd/gateway/        # エントリーポイント
+│   ├── internal/
+│   │   ├── adapter/        # ベンダーアダプター
+│   │   ├── api/            # HTTPハンドラー
+│   │   ├── config/         # 設定
+│   │   ├── mqtt/           # MQTTクライアント
+│   │   └── robot/          # ロボット管理・FSM
+│   ├── go.mod
+│   └── Dockerfile
+├── frontend/                # Next.js フロントエンド
+│   ├── src/
+│   │   ├── app/            # App Router ページ
+│   │   ├── components/     # UIコンポーネント
+│   │   ├── hooks/          # カスタムフック
+│   │   ├── lib/            # ユーティリティ
+│   │   └── types/          # TypeScript型定義
+│   ├── package.json
+│   └── Dockerfile
+├── docker/                  # Docker設定
+├── scripts/                 # ユーティリティスクリプト
+├── .github/workflows/       # CI/CD
+├── docker-compose.yml
+└── README.md
+```
+
+### テスト実行
+
+```bash
+# Backend テスト
 cd backend
 pytest
-pytest --cov=app tests/  # with coverage
-```
 
-### Frontend Tests
-```bash
+# Gateway テスト
+cd gateway
+go test ./...
+
+# Frontend テスト
 cd frontend
-npm run test:unit
-npm run test:e2e
+npm test
 ```
 
-## 📊 Architecture
+### コード品質
 
-システムアーキテクチャの詳細は [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md) を参照してください。
+```bash
+# Backend リンター
+cd backend
+ruff check .
+mypy .
 
-主要な通信フロー:
+# Gateway リンター
+cd gateway
+golangci-lint run
+
+# Frontend リンター
+cd frontend
+npm run lint
 ```
-Frontend ←→ WebSocket ←→ Backend ←→ MQTT ←→ Robot/Unity
-                                  ↓
-                              PostgreSQL
+
+## 🔧 トラブルシューティング
+
+### よくある問題
+
+#### Docker Composeが起動しない
+
+```bash
+# Docker デーモンが起動しているか確認
+sudo systemctl status docker
+
+# 古いコンテナを削除
+docker-compose down -v
+docker system prune -f
 ```
 
-## 🔒 Security
+#### データベース接続エラー
 
-- CORS設定
-- 環境変数による機密情報管理
-- SQLインジェクション対策（ORM使用）
-- XSS対策（Vue.jsの自動エスケープ）
+```bash
+# PostgreSQLコンテナのログを確認
+docker-compose logs postgres
 
-本番環境では以下を実装してください：
-- JWT認証
-- HTTPS/WSS
-- MQTT over TLS
-- API Rate Limiting
+# データベースを再作成
+docker-compose down -v
+docker-compose up -d postgres
+```
 
-## 📝 License
+#### MQTTブローカーに接続できない
+
+```bash
+# Mosquittoのログを確認
+docker-compose logs mosquitto
+
+# ポートが使用されていないか確認
+netstat -tlnp | grep 1883
+```
+
+## 📄 ライセンス
 
 MIT License
 
-## 🤝 Contributing
+## 👥 コントリビューション
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📧 Contact
-
-Project Link: https://github.com/akinami3/robot-ml-web-app
-
-## 🙏 Acknowledgments
-
-- FastAPI
-- Vue.js
-- PyTorch
-- Eclipse Mosquitto
+1. このリポジトリをフォーク
+2. フィーチャーブランチを作成 (`git checkout -b feature/amazing-feature`)
+3. 変更をコミット (`git commit -m 'Add amazing feature'`)
+4. ブランチにプッシュ (`git push origin feature/amazing-feature`)
+5. プルリクエストを作成

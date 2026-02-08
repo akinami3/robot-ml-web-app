@@ -1,155 +1,119 @@
 """
-FastAPI main application
+AMR SaaS Platform - Backend Main Application
 """
-import asyncio
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from structlog import get_logger
+import redis.asyncio as redis
 
-from app.api.router import api_router
-from app.config import settings
-from app.core.database import close_db, init_db
-from app.core.exceptions import RobotMLException
-from app.core.logger import configure_logging
-from app.core.mqtt import mqtt_client
-from app.core.websocket import heartbeat_task, ws_manager
+from app.config import get_settings
+from app.database import init_db
+from app.routers import auth_router, robots_router, missions_router
+from app.schemas import HealthResponse
 
-# Configure logging
-configure_logging()
-logger = get_logger(__name__)
+settings = get_settings()
+
+# Redis client
+redis_client = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager
-    Handles startup and shutdown events
-    """
+    """Application lifespan events"""
+    global redis_client
+    
     # Startup
-    logger.info("application_starting", env=settings.APP_ENV)
-
-    # Initialize database
+    print("Starting up...")
+    await init_db()
+    
+    # Initialize Redis
     try:
-        await init_db()
-        logger.info("database_initialized")
+        redis_client = redis.from_url(settings.REDIS_URL)
+        await redis_client.ping()
+        print("Redis connected")
     except Exception as e:
-        logger.error("database_init_error", error=str(e))
-
-    # Connect to MQTT broker
-    try:
-        await mqtt_client.connect()
-        logger.info("mqtt_connected")
-    except Exception as e:
-        logger.error("mqtt_connect_error", error=str(e))
-
-    # Start WebSocket heartbeat task
-    heartbeat_handle = asyncio.create_task(
-        heartbeat_task(ws_manager, interval=settings.WS_HEARTBEAT_INTERVAL)
-    )
-
-    logger.info("application_started")
-
+        print(f"Redis connection failed: {e}")
+        redis_client = None
+    
     yield
-
+    
     # Shutdown
-    logger.info("application_shutting_down")
-
-    # Cancel heartbeat task
-    heartbeat_handle.cancel()
-    try:
-        await heartbeat_handle
-    except asyncio.CancelledError:
-        pass
-
-    # Disconnect MQTT
-    try:
-        await mqtt_client.disconnect()
-        logger.info("mqtt_disconnected")
-    except Exception as e:
-        logger.error("mqtt_disconnect_error", error=str(e))
-
-    # Close database connections
-    try:
-        await close_db()
-        logger.info("database_closed")
-    except Exception as e:
-        logger.error("database_close_error", error=str(e))
-
-    logger.info("application_stopped")
+    print("Shutting down...")
+    if redis_client:
+        await redis_client.close()
 
 
-# Create FastAPI application
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Backend API for Robot ML Web Application",
-    version="0.1.0",
+    version=settings.APP_VERSION,
+    description="AMR Fleet Management SaaS Platform API",
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json",
-    lifespan=lifespan,
+    lifespan=lifespan
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["*"],  # Configure appropriately for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# Exception handlers
-@app.exception_handler(RobotMLException)
-async def robot_ml_exception_handler(request, exc: RobotMLException):
-    """Handle custom application exceptions"""
-    logger.error(
-        "application_error",
-        error=exc.message,
-        status_code=exc.status_code,
-        path=request.url.path,
-    )
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": exc.message, "type": type(exc).__name__},
-    )
+# Include routers
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(robots_router, prefix="/api/v1")
+app.include_router(missions_router, prefix="/api/v1")
 
 
-@app.exception_handler(Exception)
-async def general_exception_handler(request, exc: Exception):
-    """Handle uncaught exceptions"""
-    logger.error("uncaught_exception", error=str(exc), path=request.url.path, exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "type": "InternalServerError"},
-    )
-
-
-# Health check endpoint
-@app.get("/health", tags=["Health"])
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "mqtt_connected": mqtt_client.connected,
-        "websocket_connections": ws_manager.get_connection_count(),
-    }
-
-
-# Root endpoint
 @app.get("/", tags=["Root"])
 async def root():
     """Root endpoint"""
     return {
         "name": settings.APP_NAME,
-        "version": "0.1.0",
-        "environment": settings.APP_ENV,
-        "docs": "/docs",
+        "version": settings.APP_VERSION,
+        "docs": "/docs"
     }
 
 
-# Include API routers
-app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
+async def health_check():
+    """Health check endpoint"""
+    from app.services import GatewayClient
+    
+    # Check database
+    db_status = "healthy"
+    try:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await session.execute("SELECT 1")
+    except Exception:
+        db_status = "unhealthy"
+    
+    # Check Redis
+    redis_status = "healthy"
+    try:
+        if redis_client:
+            await redis_client.ping()
+        else:
+            redis_status = "disconnected"
+    except Exception:
+        redis_status = "unhealthy"
+    
+    # Check Gateway
+    gateway_client = GatewayClient()
+    mqtt_status = "healthy" if await gateway_client.health_check() else "unhealthy"
+    
+    return HealthResponse(
+        status="healthy" if db_status == "healthy" else "degraded",
+        version=settings.APP_VERSION,
+        database=db_status,
+        redis=redis_status,
+        mqtt=mqtt_status
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

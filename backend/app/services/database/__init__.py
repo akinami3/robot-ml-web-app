@@ -1,3 +1,0 @@
-"""
-Database service package
-"""
