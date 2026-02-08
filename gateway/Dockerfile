@@ -31,8 +31,8 @@ COPY --from=builder /gateway .
 RUN adduser -D -g '' appuser
 USER appuser
 
-# Expose port
-EXPOSE 8080
+# Expose gRPC port
+EXPOSE 50051
 
 # Run the application
 CMD ["./gateway"]

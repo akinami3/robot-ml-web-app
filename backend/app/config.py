@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     MQTT_BROKER_PORT: int = 1883
     MQTT_TOPIC_PREFIX: str = "amr/"
     
-    # Gateway
-    GATEWAY_URL: str = "http://gateway:8080"
+    # Gateway (gRPC)
+    GATEWAY_GRPC_ADDRESS: str = "gateway:50051"
     
     class Config:
         env_file = ".env"
@@ -40,3 +40,6 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
+
+
+settings = get_settings()

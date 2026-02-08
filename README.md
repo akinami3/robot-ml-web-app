@@ -27,8 +27,8 @@
 
 | コンポーネント | 技術 |
 |--------------|------|
-| Backend | Python 3.11, FastAPI 0.109, SQLAlchemy 2.0 |
-| Gateway | Go 1.21, Gin, MQTT |
+| Backend | Python 3.11, FastAPI 0.109, SQLAlchemy 2.0, gRPC |
+| Gateway | Go 1.21, gRPC, MQTT |
 | Frontend | Next.js 14, React 18, TypeScript, TanStack Query |
 | Database | PostgreSQL 15, Redis 7 |
 | Message Broker | Eclipse Mosquitto (MQTT) |
@@ -49,10 +49,10 @@
 │  │   Auth   │  │  Robots  │  │ Missions │  │   Logs   │    │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
 └─────────────────────────┬───────────────────────────────────┘
-                          │ REST API
+                          │ gRPC
 ┌─────────────────────────▼───────────────────────────────────┐
 │                     Fleet Gateway                            │
-│                        (Go/Gin)                              │
+│                     (Go + gRPC)                              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐                   │
 │  │   FSM    │  │ Adapters │  │   MQTT   │                   │
 │  └──────────┘  └──────────┘  └──────────┘                   │
@@ -118,10 +118,12 @@ JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=1440
 
 # MQTT
-MQTT_BROKER=mqtt://mosquitto:1883
+MQTT_BROKER_HOST=mosquitto
+MQTT_BROKER_PORT=1883
 
-# Gateway
-GATEWAY_URL=http://gateway:8081
+# Gateway (gRPC)
+GRPC_PORT=50051
+GATEWAY_GRPC_ADDRESS=gateway:50051
 
 # Frontend
 NEXT_PUBLIC_API_URL=http://localhost:8000
@@ -171,8 +173,9 @@ cd gateway
 go mod download
 
 # 環境変数の設定
-export MQTT_BROKER="tcp://localhost:1883"
-export BACKEND_URL="http://localhost:8000"
+export MQTT_BROKER_HOST="localhost"
+export MQTT_BROKER_PORT="1883"
+export GRPC_PORT="50051"
 
 # サーバー起動
 go run cmd/gateway/main.go
@@ -219,7 +222,7 @@ docker-compose down -v
 | Frontend | http://localhost:3000 | Web UI |
 | Backend API | http://localhost:8000 | REST API |
 | API Docs | http://localhost:8000/docs | Swagger UI |
-| Gateway | http://localhost:8081 | Fleet Gateway |
+| Gateway (gRPC) | localhost:50051 | Fleet Gateway gRPC |
 | PostgreSQL | localhost:5432 | Database |
 | Redis | localhost:6379 | Cache |
 | Mosquitto | localhost:1883 | MQTT Broker |
@@ -383,9 +386,10 @@ amr-saas-platform/
 │   └── Dockerfile
 ├── gateway/                 # Go Fleet Gateway
 │   ├── cmd/gateway/        # エントリーポイント
+│   ├── proto/              # Protocol Buffers定義
 │   ├── internal/
 │   │   ├── adapter/        # ベンダーアダプター
-│   │   ├── api/            # HTTPハンドラー
+│   │   ├── grpc/           # gRPCサーバー
 │   │   ├── config/         # 設定
 │   │   ├── mqtt/           # MQTTクライアント
 │   │   └── robot/          # ロボット管理・FSM

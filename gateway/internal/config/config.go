@@ -7,14 +7,14 @@ import (
 
 // Config holds the application configuration
 type Config struct {
-	// HTTP Server
-	HTTPPort string
+	// gRPC Server
+	GRPCPort string
 	Debug    bool
 
 	// MQTT
-	MQTTBrokerHost string
-	MQTTBrokerPort int
-	MQTTClientID   string
+	MQTTBrokerHost  string
+	MQTTBrokerPort  int
+	MQTTClientID    string
 	MQTTTopicPrefix string
 
 	// Backend
@@ -27,7 +27,7 @@ type Config struct {
 // Load loads configuration from environment variables
 func Load() *Config {
 	return &Config{
-		HTTPPort:        getEnv("HTTP_PORT", "8080"),
+		GRPCPort:        getEnv("GRPC_PORT", "50051"),
 		Debug:           getEnvBool("DEBUG", false),
 		MQTTBrokerHost:  getEnv("MQTT_BROKER_HOST", "mqtt-broker"),
 		MQTTBrokerPort:  getEnvInt("MQTT_BROKER_PORT", 1883),

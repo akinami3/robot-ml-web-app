@@ -68,7 +68,7 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-this-in-production}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
-      GATEWAY_URL: ${GATEWAY_URL:-http://gateway:8081}
+      GATEWAY_GRPC_ADDRESS: ${GATEWAY_GRPC_ADDRESS:-gateway:50051}
     ports:
       - "8000:8000"
     depends_on:
@@ -90,12 +90,12 @@ services:
       dockerfile: Dockerfile
     container_name: amr-gateway
     environment:
-      MQTT_BROKER: ${MQTT_BROKER:-tcp://mosquitto:1883}
+      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-mosquitto}
+      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT:-1883}
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-amr-gateway}
-      BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
-      PORT: "8081"
+      GRPC_PORT: "50051"
     ports:
-      - "8081:8081"
+      - "50051:50051"
     depends_on:
       - mosquitto
       - backend

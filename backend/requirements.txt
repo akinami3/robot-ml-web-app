@@ -27,6 +27,10 @@ paho-mqtt==1.6.1
 # HTTP Client
 httpx==0.26.0
 
+# gRPC
+grpcio==1.60.0
+grpcio-tools==1.60.0
+
 # Utilities
 python-dotenv==1.0.0
 

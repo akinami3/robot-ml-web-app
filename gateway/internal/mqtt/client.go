@@ -140,13 +140,11 @@ func (c *Client) handleStatusMessage(client paho.Client, msg paho.Message) {
 
 	c.robotManager.UpdateStatus(
 		status.RobotID,
-		robot.State(status.State),
+		status.State,
 		status.Battery,
-		robot.Position{
-			X:     status.Pose.X,
-			Y:     status.Pose.Y,
-			Theta: status.Pose.Theta,
-		},
+		status.Pose.X,
+		status.Pose.Y,
+		status.Pose.Theta,
 	)
 
 	c.logger.Debugf("Received status from %s: state=%s, battery=%.1f",
@@ -157,7 +155,9 @@ func (c *Client) handleStatusMessage(client paho.Client, msg paho.Message) {
 func (c *Client) handleHeartbeatMessage(client paho.Client, msg paho.Message) {
 	var heartbeat struct {
 		RobotID string `json:"robot_id"`
+		Name    string `json:"name"`
 		Vendor  string `json:"vendor"`
+		Model   string `json:"model"`
 	}
 	if err := json.Unmarshal(msg.Payload(), &heartbeat); err != nil {
 		c.logger.Warnf("Failed to parse heartbeat message: %v", err)
@@ -165,7 +165,11 @@ func (c *Client) handleHeartbeatMessage(client paho.Client, msg paho.Message) {
 	}
 
 	// Register robot if not exists, or update last seen
-	c.robotManager.RegisterRobot(heartbeat.RobotID, heartbeat.Vendor, robot.Capabilities{
+	name := heartbeat.Name
+	if name == "" {
+		name = heartbeat.RobotID
+	}
+	c.robotManager.RegisterRobot(heartbeat.RobotID, name, heartbeat.Vendor, heartbeat.Model, robot.Capabilities{
 		SupportsPause:   true,
 		SupportsDocking: false,
 	})

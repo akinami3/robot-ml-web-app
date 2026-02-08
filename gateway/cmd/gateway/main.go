@@ -1,18 +1,14 @@
 package main
 
 import (
-	"context"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"github.com/amr-saas/gateway/internal/api"
 	"github.com/amr-saas/gateway/internal/config"
+	grpcserver "github.com/amr-saas/gateway/internal/grpc"
 	"github.com/amr-saas/gateway/internal/mqtt"
 	"github.com/amr-saas/gateway/internal/robot"
-	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -24,13 +20,6 @@ func main() {
 
 	// Load configuration
 	cfg := config.Load()
-
-	// Set Gin mode
-	if cfg.Debug {
-		gin.SetMode(gin.DebugMode)
-	} else {
-		gin.SetMode(gin.ReleaseMode)
-	}
 
 	// Initialize robot manager
 	robotManager := robot.NewManager(sugar)
@@ -48,19 +37,15 @@ func main() {
 		sugar.Info("Connected to MQTT broker")
 	}
 
-	// Initialize HTTP server
-	router := api.SetupRouter(cfg, robotManager, mqttClient, sugar)
+	// Initialize gRPC server
+	grpcServer := grpcserver.NewServer(robotManager, sugar)
 
-	srv := &http.Server{
-		Addr:    ":" + cfg.HTTPPort,
-		Handler: router,
-	}
-
-	// Start server
+	// Start gRPC server in goroutine
 	go func() {
-		sugar.Infof("Starting Fleet Gateway on port %s", cfg.HTTPPort)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			sugar.Fatalf("Failed to start server: %v", err)
+		grpcAddr := ":" + cfg.GRPCPort
+		sugar.Infof("Starting Fleet Gateway gRPC server on %s", grpcAddr)
+		if err := grpcServer.Start(grpcAddr); err != nil {
+			sugar.Fatalf("Failed to start gRPC server: %v", err)
 		}
 	}()
 
@@ -70,14 +55,7 @@ func main() {
 	<-quit
 	sugar.Info("Shutting down server...")
 
-	// Graceful shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		sugar.Fatalf("Server forced to shutdown: %v", err)
-	}
-
+	// Cleanup
 	mqttClient.Disconnect()
 	sugar.Info("Server exited")
 }
