@@ -21,6 +21,7 @@
 - **ミッション管理**: タスクの作成・割り当て・進捗追跡
 - **リアルタイム監視**: Frontend↔Gateway直接WebSocket通信による低レイテンシ状態更新
 - **ML用データ記録**: センサ/制御値のON/OFF切替でDB保存（機械学習対応）
+- **コマンドデータ記録**: 操作者の制御コマンド（state, action）ペアをDB保存（模倣学習・強化学習対応）
 - **マルチベンダー対応**: Adapterパターンによる異なるメーカーのロボット統合
 - **認証・認可**: JWT認証とRBACによるアクセス制御
 
@@ -69,8 +70,8 @@
 | 経路 | プロトコル | 用途 | 特性 |
 |------|------------|------|------|
 | Frontend ↔ Gateway | WebSocket | ロボット操作・リアルタイム状態・記録ON/OFF | 低レイテンシ |
-| Frontend ↔ Backend | REST | 認証・CRUD・ML・センサデータ照会 | ビジネスロジック |
-| Gateway → Backend | gRPC | センサ/制御値のDB保存転送 | 確実性重視 |
+| Frontend ↔ Backend | REST | 認証・CRUD・ML・センサ/コマンドデータ照会 | ビジネスロジック |
+| Gateway → Backend | gRPC | センサ/制御値・コマンドデータのDB保存転送 | 確実性重視 |
 | Gateway ↔ AMR | MQTT | ロボット制御 | ベンダー対応 |
 
 ### クラス図
@@ -126,9 +127,17 @@ classDiagram
         +record_batch(records)
     }
     
+    class CommandDataService {
+        +get_command_data(filters)
+        +get_stats()
+        +get_training_pairs(robot_id)
+        +record_batch(records)
+    }
+    
     class DataRecordingServer {
         +RecordSensorData(batch)
         +StreamSensorData(stream)
+        +RecordCommandData(batch)
     }
     
     %% Gateway Layer
@@ -146,9 +155,10 @@ classDiagram
     }
     
     class BackendForwarder {
-        -buffer[]
+        -sensorBuf recordBuffer
+        -commandBuf recordBuffer
         +ForwardSensorData()
-        +flush()
+        +ForwardCommandData()
     }
     
     class RobotManager {
@@ -192,6 +202,7 @@ classDiagram
         +missions table
         +users table
         +sensor_data_records table
+        +command_data_records table
     }
     
     %% Relationships
@@ -203,6 +214,7 @@ classDiagram
     Backend --> RobotService
     Backend --> MissionService
     Backend --> SensorDataService
+    Backend --> CommandDataService
     Backend --> DataRecordingServer
     Backend --> PostgreSQL
     
@@ -299,6 +311,46 @@ sequenceDiagram
     F->>B: GET /api/v1/sensor-data?robot_id=R1
     B->>DB: SELECT * FROM sensor_data_records
     B-->>F: センサデータ一覧
+```
+
+#### コマンドデータ記録フロー（ML用 状態-行動ペア）
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant F as Frontend
+    participant G as Gateway
+    participant B as Backend
+    participant DB as PostgreSQL
+
+    Note over U,F: 記録ONの状態でコマンド操作
+    U->>F: 移動コマンド送信
+    F->>G: WebSocket {type: "command", command: "move", params: {x,y}}
+
+    Note over G: コマンド実行前にロボット状態を取得
+    G->>G: robotStateBefore = GetSensorData + GetControlData
+
+    G->>G: RobotManager.MoveRobot()
+
+    alt 記録ON
+        Note over G: (state, action)ペアをバッファリング
+        G->>G: commandBuf.add({state, command, params})
+
+        alt バッファ満 or タイマー
+            G->>B: gRPC RecordCommandData(batch)
+            B->>DB: INSERT command_data_records
+            B-->>G: {success: true, recorded_count: N}
+        end
+    end
+
+    G-->>F: WebSocket {type: "command_response", success: true}
+    F-->>U: コマンド応答表示
+
+    Note over U,DB: 後日ML学習時
+    F->>B: GET /api/v1/command-data/training-pairs?robot_id=R1
+    B->>DB: SELECT * FROM command_data_records
+    B-->>F: (state, action)ペア一覧
 ```
 
 #### ミッション実行フロー
@@ -709,6 +761,16 @@ curl -X GET http://localhost:8000/api/v1/missions \
 | GET | /api/v1/sensor-data/stats | ロボット別統計 |
 | DELETE | /api/v1/sensor-data/{robot_id} | センサデータ削除 |
 
+### コマンドデータエンドポイント
+
+| Method | Endpoint | 説明 |
+|--------|----------|------|
+| GET | /api/v1/command-data | コマンドデータ取得（フィルタ対応） |
+| GET | /api/v1/command-data/stats | ロボット別統計 |
+| GET | /api/v1/command-data/command-types | コマンド種別別集計 |
+| GET | /api/v1/command-data/training-pairs | ML学習用 (state, action) ペア取得 |
+| DELETE | /api/v1/command-data/{robot_id} | コマンドデータ削除 |
+
 ### Gateway WebSocket API
 
 接続先: `ws://localhost:8082/ws?token={JWT_TOKEN}`
@@ -731,14 +793,21 @@ curl -X GET http://localhost:8000/api/v1/missions \
 
 ```
 amr-saas-platform/
+├── proto/                   # Protocol Buffers定義（正本）
+│   └── fleet.proto          # FleetGateway + DataRecordingService
 ├── backend/                 # FastAPI バックエンド
+│   ├── proto/              # fleet.proto コピー（Docker build用）
 │   ├── app/
 │   │   ├── auth/           # 認証モジュール
 │   │   ├── models/         # SQLAlchemy モデル
+│   │   │   ├── models.py   # Robot, Mission, User
+│   │   │   ├── sensor_data.py  # SensorDataRecord
+│   │   │   └── command_data.py # CommandDataRecord
 │   │   ├── routers/        # APIエンドポイント
+│   │   │   ├── sensor_data.py  # センサデータ REST API
+│   │   │   └── command_data.py # コマンドデータ REST API
 │   │   ├── schemas/        # Pydantic スキーマ
-│   │   ├── services/       # ビジネスロジック
-│   │   ├── grpc_client/    # Gateway向けgRPCクライアント
+│   │   ├── grpc_client/    # Gateway向けgRPCクライアント（proto自動生成）
 │   │   ├── grpc_server/    # データ記録受信gRPCサーバー
 │   │   ├── config.py       # 設定
 │   │   ├── database.py     # DB接続
@@ -746,13 +815,13 @@ amr-saas-platform/
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── gateway/                 # Go Fleet Gateway
+│   ├── proto/              # fleet.proto コピー（Docker build用）
 │   ├── cmd/gateway/        # エントリーポイント
-│   ├── proto/              # Protocol Buffers定義
 │   ├── internal/
-│   │   ├── adapter/        # ベンダーアダプター
-│   │   ├── grpc/           # gRPCサーバー
-│   │   ├── websocket/      # WebSocketサーバー（Frontend向け）
-│   │   ├── forwarder/      # Backendデータ転送
+│   │   ├── adapter/        # ベンダーアダプター (Adapter Pattern)
+│   │   ├── grpc/           # FleetGateway gRPCサーバー
+│   │   ├── websocket/      # WebSocketサーバー（Frontend直接通信）
+│   │   ├── forwarder/      # Backend転送（Generic Buffer Pattern）
 │   │   ├── config/         # 設定
 │   │   ├── mqtt/           # MQTTクライアント
 │   │   └── robot/          # ロボット管理・FSM
@@ -768,9 +837,12 @@ amr-saas-platform/
 │   ├── package.json
 │   └── Dockerfile
 ├── docker/                  # Docker設定
-├── scripts/                 # ユーティリティスクリプト
+│   └── mosquitto/          # MQTT Broker設定
+├── scripts/
+│   └── sync-proto.sh       # Proto定義の同期スクリプト
 ├── .github/workflows/       # CI/CD
 ├── docker-compose.yml
+├── .env / .env.example
 └── README.md
 ```
 

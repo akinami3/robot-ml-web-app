@@ -124,3 +124,66 @@ export interface CommandResponse {
 export interface ApiError {
   detail: string;
 }
+
+// Sensor Data Recording types
+export interface SensorDataRecord {
+  id: number;
+  robot_id: string;
+  recorded_at: string;
+  sensor_data: Record<string, number>;
+  control_data: Record<string, number>;
+  created_at: string;
+}
+
+export interface SensorDataStats {
+  robot_id: string;
+  total_records: number;
+  earliest: string | null;
+  latest: string | null;
+}
+
+// Command Data Recording types
+export interface CommandDataRecord {
+  id: number;
+  robot_id: string;
+  recorded_at: string;
+  command: string;
+  parameters: Record<string, number>;
+  user_id: string | null;
+  success: boolean;
+  error_message: string | null;
+  robot_state_before: Record<string, number>;
+  created_at: string;
+}
+
+export interface CommandDataStats {
+  robot_id: string;
+  total_commands: number;
+  earliest: string | null;
+  latest: string | null;
+  success_count: number;
+  failure_count: number;
+}
+
+export interface CommandTypeStats {
+  command: string;
+  count: number;
+  success_rate: number;
+}
+
+// ML Training Pair types
+export interface TrainingPair {
+  timestamp: string;
+  state: Record<string, number>;
+  action: {
+    command: string;
+    parameters: Record<string, number>;
+  };
+  user_id: string | null;
+}
+
+export interface TrainingPairsResponse {
+  robot_id: string;
+  total_pairs: number;
+  pairs: TrainingPair[];
+}

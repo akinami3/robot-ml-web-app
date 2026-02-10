@@ -12,7 +12,7 @@ from app.database import get_db
 from app.models import Mission, Robot, User
 from app.schemas import MissionCreate, MissionResponse, MissionListResponse
 from app.auth import get_current_user, get_current_operator_or_admin
-from app.services.gateway_client import GatewayClient
+from app.grpc_client import get_gateway_client
 
 router = APIRouter(prefix="/missions", tags=["Missions"])
 
@@ -85,14 +85,18 @@ async def create_mission(
     await db.commit()
     await db.refresh(mission)
     
-    # Send move command to gateway
-    gateway_client = GatewayClient()
+    # Send move command to gateway via gRPC
+    client = get_gateway_client()
     try:
-        await gateway_client.send_move_command(
+        await client.connect()
+        await client.send_command(
             robot_id=mission_data.robot_id,
-            goal_x=mission_data.goal_x,
-            goal_y=mission_data.goal_y,
-            goal_theta=mission_data.goal_theta
+            command="move",
+            parameters={
+                "goal_x": mission_data.goal_x,
+                "goal_y": mission_data.goal_y,
+                "goal_theta": mission_data.goal_theta
+            }
         )
         mission.status = "IN_PROGRESS"
         mission.started_at = datetime.utcnow()
@@ -143,9 +147,17 @@ async def cancel_mission(
     robot = robot_result.scalar_one_or_none()
     
     if robot:
-        # Send stop command
-        gateway_client = GatewayClient()
-        await gateway_client.send_stop_command(robot_id=robot.robot_id)
+        # Send stop command via gRPC
+        client = get_gateway_client()
+        try:
+            await client.connect()
+            await client.send_command(
+                robot_id=robot.robot_id,
+                command="stop",
+                parameters={}
+            )
+        except Exception:
+            pass  # Best-effort stop on cancellation
     
     mission.status = "CANCELLED"
     mission.completed_at = datetime.utcnow()

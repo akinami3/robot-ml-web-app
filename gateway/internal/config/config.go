@@ -7,25 +7,24 @@ import (
 
 // Config holds the application configuration
 type Config struct {
-	// gRPC Server
+	// gRPC Server (FleetGateway service)
 	GRPCPort string
 	Debug    bool
 
-	// WebSocket Server (for Frontend)
+	// WebSocket Server (Frontend direct communication)
 	WebSocketPort string
 	JWTSecret     string
 
-	// MQTT
+	// MQTT (Robot communication)
 	MQTTBrokerHost  string
 	MQTTBrokerPort  int
 	MQTTClientID    string
 	MQTTTopicPrefix string
 
-	// Backend (for data recording)
-	BackendURL         string
+	// Backend gRPC (data recording destination)
 	BackendGRPCAddress string
 
-	// Redis
+	// Redis (caching)
 	RedisURL string
 }
 
@@ -40,7 +39,6 @@ func Load() *Config {
 		MQTTBrokerPort:     getEnvInt("MQTT_BROKER_PORT", 1883),
 		MQTTClientID:       getEnv("MQTT_CLIENT_ID", "fleet-gateway"),
 		MQTTTopicPrefix:    getEnv("MQTT_TOPIC_PREFIX", "amr/"),
-		BackendURL:         getEnv("BACKEND_URL", "http://backend:8000"),
 		BackendGRPCAddress: getEnv("BACKEND_GRPC_ADDRESS", "backend:50052"),
 		RedisURL:           getEnv("REDIS_URL", "redis://redis:6379/0"),
 	}

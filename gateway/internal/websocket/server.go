@@ -102,6 +102,7 @@ type Server struct {
 // BackendForwarder interface for forwarding data to backend
 type BackendForwarder interface {
 	ForwardSensorData(robotID string, sensorData, controlData map[string]float64) error
+	ForwardCommandData(robotID, userID, command string, params map[string]float64, success bool, errorMsg string, robotStateBefore map[string]float64) error
 }
 
 // NewServer creates a new WebSocket server
@@ -408,6 +409,15 @@ func (c *Client) handleCommand(msg Message) {
 		return
 	}
 
+	// Capture robot state before command execution (for ML training data)
+	robtStateBefore := make(map[string]float64)
+	if r, err := c.server.manager.GetRobot(msg.RobotID); err == nil && r != nil {
+		robtStateBefore["x"] = r.X
+		robtStateBefore["y"] = r.Y
+		robtStateBefore["theta"] = r.Theta
+		robtStateBefore["battery"] = r.Battery
+	}
+
 	var err error
 	switch msg.Command {
 	case "move":
@@ -425,20 +435,44 @@ func (c *Client) handleCommand(msg Message) {
 		return
 	}
 
+	success := err == nil
+	errorMsg := ""
+	if err != nil {
+		errorMsg = err.Error()
+	}
+
 	response := Message{
 		Type:      MsgCommandResponse,
 		RobotID:   msg.RobotID,
 		Command:   msg.Command,
-		Success:   err == nil,
+		Success:   success,
 		Timestamp: time.Now().UnixMilli(),
 	}
 
 	if err != nil {
-		response.Error = err.Error()
+		response.Error = errorMsg
 	}
 
 	data, _ := json.Marshal(response)
 	c.send <- data
+
+	// Forward command data to backend if recording is enabled for this robot
+	c.mu.RLock()
+	isRecording := c.recordingBots[msg.RobotID]
+	c.mu.RUnlock()
+
+	if isRecording && c.server.backendForwarder != nil {
+		cmdParams := make(map[string]float64)
+		for k, v := range msg.Params {
+			if fv, ok := v.(float64); ok {
+				cmdParams[k] = fv
+			}
+		}
+		go c.server.backendForwarder.ForwardCommandData(
+			msg.RobotID, c.userID, msg.Command,
+			cmdParams, success, errorMsg, robtStateBefore,
+		)
+	}
 }
 
 // handleSetRecording handles recording enable/disable

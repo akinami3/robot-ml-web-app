@@ -14,7 +14,7 @@ from app.schemas import (
     MoveCommand, StopCommand, CommandResponse
 )
 from app.auth import get_current_user, get_current_operator_or_admin
-from app.services.gateway_client import GatewayClient
+from app.grpc_client import get_gateway_client
 
 router = APIRouter(prefix="/robots", tags=["Robots"])
 
@@ -160,16 +160,24 @@ async def move_robot(
     if not robot.is_online:
         raise HTTPException(status_code=400, detail="Robot is offline")
     
-    # Send command to gateway
-    gateway_client = GatewayClient()
-    response = await gateway_client.send_move_command(
+    # Send command to gateway via gRPC
+    client = get_gateway_client()
+    await client.connect()
+    result = await client.send_command(
         robot_id=robot_id,
-        goal_x=command.goal.x,
-        goal_y=command.goal.y,
-        goal_theta=command.goal.theta
+        command_type="move",
+        parameters={
+            "x": str(command.goal.x),
+            "y": str(command.goal.y),
+            "theta": str(command.goal.theta),
+        },
     )
     
-    return response
+    return CommandResponse(
+        success=result["success"],
+        message=result["message"],
+        command_id=result.get("command_id"),
+    )
 
 
 @router.post("/{robot_id}/stop", response_model=CommandResponse)
@@ -185,8 +193,16 @@ async def stop_robot(
     if not robot:
         raise HTTPException(status_code=404, detail="Robot not found")
     
-    # Send command to gateway
-    gateway_client = GatewayClient()
-    response = await gateway_client.send_stop_command(robot_id=robot_id)
+    # Send command to gateway via gRPC
+    client = get_gateway_client()
+    await client.connect()
+    result = await client.send_command(
+        robot_id=robot_id,
+        command_type="stop",
+    )
     
-    return response
+    return CommandResponse(
+        success=result["success"],
+        message=result["message"],
+        command_id=result.get("command_id"),
+    )

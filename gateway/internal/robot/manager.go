@@ -64,16 +64,20 @@ type Status struct {
 
 // Manager manages all robots
 type Manager struct {
-	robots map[string]*Robot
-	mu     sync.RWMutex
-	logger *zap.SugaredLogger
+	robots          map[string]*Robot
+	sensorDataStore map[string]map[string]float64
+	controlDataStore map[string]map[string]float64
+	mu              sync.RWMutex
+	logger          *zap.SugaredLogger
 }
 
 // NewManager creates a new robot manager
 func NewManager(logger *zap.SugaredLogger) *Manager {
 	return &Manager{
-		robots: make(map[string]*Robot),
-		logger: logger,
+		robots:           make(map[string]*Robot),
+		sensorDataStore:  make(map[string]map[string]float64),
+		controlDataStore: make(map[string]map[string]float64),
+		logger:           logger,
 	}
 }
 
@@ -299,32 +303,25 @@ func (m *Manager) SetCurrentMission(id, missionID string) error {
 	return nil
 }
 
-// SensorData stores for robots
-var (
-	sensorDataStore  = make(map[string]map[string]float64)
-	controlDataStore = make(map[string]map[string]float64)
-	sensorMu         sync.RWMutex
-)
-
 // UpdateSensorData updates sensor data for a robot
 func (m *Manager) UpdateSensorData(robotID string, data map[string]float64) {
-	sensorMu.Lock()
-	defer sensorMu.Unlock()
-	sensorDataStore[robotID] = data
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sensorDataStore[robotID] = data
 }
 
 // UpdateControlData updates control data for a robot
 func (m *Manager) UpdateControlData(robotID string, data map[string]float64) {
-	sensorMu.Lock()
-	defer sensorMu.Unlock()
-	controlDataStore[robotID] = data
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.controlDataStore[robotID] = data
 }
 
 // GetSensorData returns sensor data for a robot
 func (m *Manager) GetSensorData(robotID string) map[string]float64 {
-	sensorMu.RLock()
-	defer sensorMu.RUnlock()
-	if data, exists := sensorDataStore[robotID]; exists {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if data, exists := m.sensorDataStore[robotID]; exists {
 		// Return a copy
 		result := make(map[string]float64)
 		for k, v := range data {
@@ -337,9 +334,9 @@ func (m *Manager) GetSensorData(robotID string) map[string]float64 {
 
 // GetControlData returns control data for a robot
 func (m *Manager) GetControlData(robotID string) map[string]float64 {
-	sensorMu.RLock()
-	defer sensorMu.RUnlock()
-	if data, exists := controlDataStore[robotID]; exists {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if data, exists := m.controlDataStore[robotID]; exists {
 		// Return a copy
 		result := make(map[string]float64)
 		for k, v := range data {

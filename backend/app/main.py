@@ -10,7 +10,7 @@ import asyncio
 
 from app.config import get_settings
 from app.database import init_db
-from app.routers import auth_router, robots_router, missions_router, sensor_data_router
+from app.routers import auth_router, robots_router, missions_router, sensor_data_router, command_data_router
 from app.schemas import HealthResponse
 
 settings = get_settings()
@@ -79,6 +79,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(robots_router, prefix="/api/v1")
 app.include_router(missions_router, prefix="/api/v1")
 app.include_router(sensor_data_router, prefix="/api/v1")
+app.include_router(command_data_router, prefix="/api/v1")
 
 
 @app.get("/", tags=["Root"])

@@ -1,4 +1,21 @@
-import { Token, User, Robot, RobotListResponse, Mission, MissionListResponse, MissionCreate, RobotCreate, CommandResponse, Position } from '@/types';
+import {
+  Token,
+  User,
+  Robot,
+  RobotListResponse,
+  Mission,
+  MissionListResponse,
+  MissionCreate,
+  RobotCreate,
+  CommandResponse,
+  Position,
+  SensorDataRecord,
+  SensorDataStats,
+  CommandDataRecord,
+  CommandDataStats,
+  CommandTypeStats,
+  TrainingPairsResponse,
+} from '@/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -183,22 +200,55 @@ class ApiClient {
   async getSensorDataStats(): Promise<SensorDataStats[]> {
     return this.fetch('/api/v1/sensor-data/stats');
   }
-}
 
-export interface SensorDataRecord {
-  id: number;
-  robot_id: string;
-  recorded_at: string;
-  sensor_data: Record<string, number>;
-  control_data: Record<string, number>;
-  created_at: string;
-}
+  // Command Data (recorded control commands from Backend DB)
+  async getCommandData(params?: {
+    robot_id?: string;
+    user_id?: string;
+    command?: string;
+    success?: boolean;
+    start_time?: string;
+    end_time?: string;
+    skip?: number;
+    limit?: number;
+  }): Promise<{ total: number; records: CommandDataRecord[] }> {
+    const searchParams = new URLSearchParams();
+    if (params?.robot_id) searchParams.append('robot_id', params.robot_id);
+    if (params?.user_id) searchParams.append('user_id', params.user_id);
+    if (params?.command) searchParams.append('command', params.command);
+    if (params?.success !== undefined) searchParams.append('success', params.success.toString());
+    if (params?.start_time) searchParams.append('start_time', params.start_time);
+    if (params?.end_time) searchParams.append('end_time', params.end_time);
+    if (params?.skip) searchParams.append('skip', params.skip.toString());
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
 
-export interface SensorDataStats {
-  robot_id: string;
-  total_records: number;
-  earliest: string | null;
-  latest: string | null;
+    const query = searchParams.toString();
+    return this.fetch(`/api/v1/command-data${query ? `?${query}` : ''}`);
+  }
+
+  async getCommandDataStats(): Promise<CommandDataStats[]> {
+    return this.fetch('/api/v1/command-data/stats');
+  }
+
+  async getCommandTypeStats(robotId?: string): Promise<CommandTypeStats[]> {
+    const query = robotId ? `?robot_id=${robotId}` : '';
+    return this.fetch(`/api/v1/command-data/command-types${query}`);
+  }
+
+  async getTrainingPairs(params: {
+    robot_id: string;
+    start_time?: string;
+    end_time?: string;
+    limit?: number;
+  }): Promise<TrainingPairsResponse> {
+    const searchParams = new URLSearchParams();
+    searchParams.append('robot_id', params.robot_id);
+    if (params.start_time) searchParams.append('start_time', params.start_time);
+    if (params.end_time) searchParams.append('end_time', params.end_time);
+    if (params.limit) searchParams.append('limit', params.limit.toString());
+
+    return this.fetch(`/api/v1/command-data/training-pairs?${searchParams.toString()}`);
+  }
 }
 
 export const api = new ApiClient();
