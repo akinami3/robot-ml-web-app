@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     
     # JWT
     SECRET_KEY: str = "your-secret-key-change-in-production"
+    JWT_SECRET_KEY: str = "your-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
@@ -29,8 +30,11 @@ class Settings(BaseSettings):
     MQTT_BROKER_PORT: int = 1883
     MQTT_TOPIC_PREFIX: str = "amr/"
     
-    # Gateway (gRPC)
+    # Gateway (gRPC for commands)
     GATEWAY_GRPC_ADDRESS: str = "gateway:50051"
+    
+    # gRPC Server (for data recording from Gateway)
+    GRPC_SERVER_PORT: int = 50052
     
     class Config:
         env_file = ".env"

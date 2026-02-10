@@ -20,28 +20,36 @@ Fleet Gatewayをエッジに配置し、MQTTとVendor APIを中心とした疎�
 ### 2.1 全体構成図
 
 ```
-[Frontend (Next.js)]
-        │
-        │ REST / WebSocket
-        ▼
-[Backend (FastAPI)]
-        │
-        │ gRPC (双方向ストリーミング)
-        ▼
-[Fleet Gateway (Go)]
-        │
-        │ MQTT / Vendor API
-        ▼
-[AMR (複数メーカー対応)]
+                    [Frontend (Next.js)]
+                    /                   \
+        ① WebSocket                    ② REST
+   (リアルタイム操作)            (CRUD/認証/ML)
+                  /                       \
+    [Fleet Gateway (Go)]           [Backend (FastAPI)]
+                  |                         |
+        ③ MQTT                    ④ gRPC
+     (ロボット制御)          (データ記録転送)
+                  |                         |
+                  v                         v
+    [AMR (複数メーカー対応)]           [PostgreSQL/Redis]
 ```
 
-### 2.2 レイヤー構成
+### 2.2 ハイブリッド通信アーキテクチャ
+
+| 経路 | プロトコル | 用途 | 特性 |
+|------|------------|------|------|
+| Frontend ↔ Gateway | WebSocket | ロボット操作・リアルタイム状態 | 低レイテンシ |
+| Frontend ↔ Backend | REST | CRUD・認証・ML | ビジネスロジック |
+| Gateway → Backend | gRPC | データ記録転送 | 確実性重視 |
+| Gateway ↔ AMR | MQTT | ロボット制御 | ベンダー対応 |
+
+### 2.3 レイヤー構成
 
 | レイヤー | 技術 | 役割 |
 |---------|------|------|
 | Frontend | Next.js (React + TypeScript) | UI・状態表示・ミッション投入 |
-| Backend | Python + FastAPI | API・認証・データ管理 |
-| Fleet Gateway | Python (または Go) | リアルタイム制御・プロトコル変換 |
+| Backend | Python + FastAPI | API・認証・データ管理・ML |
+| Fleet Gateway | Go + WebSocket + gRPC | リアルタイム制御・プロトコル変換 |
 | Database | PostgreSQL / Redis | データ永続化・キャッシュ |
 | Message Broker | MQTT (EMQX / Mosquitto) | 非同期通信・イベント配信 |
 
@@ -65,13 +73,15 @@ Fleet Gatewayをエッジに配置し、MQTTとVendor APIを中心とした疎�
 - ミッション投入・管理
 - ログ・分析表示
 - ユーザー管理
+- データ記録ON/OFF切り替え
 
 ### 3.3 通信方式
 
-| 用途 | プロトコル |
-|------|------------|
-| 操作・設定 | REST (HTTP + JSON) |
-| 状態表示 | WebSocket |
+| 用途 | 宛先 | プロトコル |
+|------|------|------------|
+| ロボット操作・状態 | Gateway | WebSocket |
+| 認証・CRUD・ML | Backend | REST |
+| データ記録切り替え | Gateway | WebSocket |
 
 ---
 
@@ -171,27 +181,48 @@ Fleet Gateway
 
 ## 6. 通信プロトコル
 
-### 6.1 Frontend ↔ Backend
+### 6.1 Frontend ↔ Gateway（リアルタイム操作）
 
 | 用途 | プロトコル | 特徴 |
 |------|------------|------|
-| CRUD・設定 | REST | 実装簡単、デバッグ容易 |
-| リアルタイム状態 | WebSocket | 双方向、プッシュ通知 |
+| ロボット状態ストリーム | WebSocket | リアルタイムプッシュ通知 |
+| ロボットコマンド | WebSocket | 低レイテンシ操作 |
+| データ記録ON/OFF | WebSocket | センサ/制御値の保存切り替え |
 
-### 6.2 Backend ↔ Fleet Gateway
+**設計ポイント**：
+- JWTトークンで認証（Backendで発行）
+- ロボット操作はBackendを経由せず直接通信
+- データ記録有効時はGatewayがBackendへ転送
+
+### 6.2 Frontend ↔ Backend（CRUD・ML）
 
 | 用途 | プロトコル | 特徴 |
 |------|------------|------|
-| コマンド送信 | gRPC (Unary) | 同期、型安全 |
-| 状態ストリーム | gRPC (Server Streaming) | リアルタイム状態配信 |
-| 双方向通信 | gRPC (Bidirectional) | 高性能、低遅延 |
+| 認証・認可 | REST | JWT発行・RBAC |
+| ミッションCRUD | REST | ビジネスロジック |
+| ロボット登録・削除 | REST | マスタデータ管理 |
+| ML推論・分析 | REST | 機械学習API |
+| センサデータ取得 | REST | 保存済みデータ照会 |
 
-**gRPC採用理由**：
-- Protocol Buffersによる型安全・高速シリアライズ
-- 双方向ストリーミングでリアルタイム性確保
-- Go/Pythonでの高品質ライブラリ
+### 6.3 Gateway → Backend（データ記録転送）
 
-### 6.3 Fleet Gateway ↔ AMR
+| 用途 | プロトコル | 特徴 |
+|------|------------|------|
+| センサ・制御値保存 | gRPC (Unary) | 確実性重視、リトライ付き |
+| バッチ転送 | gRPC (Client Streaming) | 高効率大量データ |
+
+**データ記録フロー**：
+```
+Frontend --[WebSocket]--> Gateway --[gRPC]--> Backend --[SQL]--> PostgreSQL
+          (リアルタイム)   (バッファリング)  (確実保存)   (永続化)
+```
+
+**設計ポイント**：
+- Gateway内でバッファリング（リアルタイム性を損なわない）
+- BackendへはgRPCでリトライ付き送信（確実性）
+- 記録ON/OFFはFrontendからWebSocketで切り替え
+
+### 6.4 Gateway ↔ AMR
 
 | 用途 | プロトコル | 備考 |
 |------|------------|------|

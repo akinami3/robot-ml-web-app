@@ -6,9 +6,11 @@ import (
 	"syscall"
 
 	"github.com/amr-saas/gateway/internal/config"
+	"github.com/amr-saas/gateway/internal/forwarder"
 	grpcserver "github.com/amr-saas/gateway/internal/grpc"
 	"github.com/amr-saas/gateway/internal/mqtt"
 	"github.com/amr-saas/gateway/internal/robot"
+	"github.com/amr-saas/gateway/internal/websocket"
 	"go.uber.org/zap"
 )
 
@@ -37,7 +39,33 @@ func main() {
 		sugar.Info("Connected to MQTT broker")
 	}
 
-	// Initialize gRPC server
+	// Initialize backend forwarder for data recording
+	backendForwarder, err := forwarder.NewBackendForwarder(cfg.BackendGRPCAddress, 100, sugar)
+	if err != nil {
+		sugar.Warnf("Failed to create backend forwarder: %v", err)
+	} else {
+		sugar.Info("Backend forwarder initialized")
+	}
+
+	// Initialize WebSocket server for Frontend direct communication
+	wsServer := websocket.NewServer(robotManager, sugar, cfg.JWTSecret)
+	if backendForwarder != nil {
+		wsServer.SetBackendForwarder(backendForwarder)
+	}
+
+	// Start WebSocket server hub
+	go wsServer.Run()
+
+	// Start WebSocket HTTP server
+	go func() {
+		wsAddr := ":" + cfg.WebSocketPort
+		sugar.Infof("Starting WebSocket server on %s", wsAddr)
+		if err := wsServer.Start(wsAddr); err != nil {
+			sugar.Fatalf("Failed to start WebSocket server: %v", err)
+		}
+	}()
+
+	// Initialize gRPC server (for Backend data recording)
 	grpcServer := grpcserver.NewServer(robotManager, sugar)
 
 	// Start gRPC server in goroutine
@@ -56,6 +84,9 @@ func main() {
 	sugar.Info("Shutting down server...")
 
 	// Cleanup
+	if backendForwarder != nil {
+		backendForwarder.Close()
+	}
 	mqttClient.Disconnect()
 	sugar.Info("Server exited")
 }

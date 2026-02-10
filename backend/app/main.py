@@ -6,9 +6,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as redis
 
+import asyncio
+
 from app.config import get_settings
 from app.database import init_db
-from app.routers import auth_router, robots_router, missions_router
+from app.routers import auth_router, robots_router, missions_router, sensor_data_router
 from app.schemas import HealthResponse
 
 settings = get_settings()
@@ -35,10 +37,21 @@ async def lifespan(app: FastAPI):
         print(f"Redis connection failed: {e}")
         redis_client = None
     
+    # Start gRPC server for data recording from Gateway
+    grpc_task = None
+    try:
+        from app.grpc_server import start_grpc_server
+        grpc_task = asyncio.create_task(start_grpc_server())
+        print(f"Data recording gRPC server started on port {settings.GRPC_SERVER_PORT}")
+    except Exception as e:
+        print(f"Failed to start gRPC server: {e}")
+    
     yield
     
     # Shutdown
     print("Shutting down...")
+    if grpc_task:
+        grpc_task.cancel()
     if redis_client:
         await redis_client.close()
 
@@ -65,6 +78,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(robots_router, prefix="/api/v1")
 app.include_router(missions_router, prefix="/api/v1")
+app.include_router(sensor_data_router, prefix="/api/v1")
 
 
 @app.get("/", tags=["Root"])
@@ -80,14 +94,14 @@ async def root():
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
     """Health check endpoint"""
-    from app.services import GatewayClient
     
     # Check database
     db_status = "healthy"
     try:
+        from sqlalchemy import text
         from app.database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
     except Exception:
         db_status = "unhealthy"
     
@@ -101,16 +115,23 @@ async def health_check():
     except Exception:
         redis_status = "unhealthy"
     
-    # Check Gateway
-    gateway_client = GatewayClient()
-    mqtt_status = "healthy" if await gateway_client.health_check() else "unhealthy"
+    # Check Gateway via gRPC
+    gateway_status = "unknown"
+    try:
+        from app.grpc_client import get_gateway_client
+        client = get_gateway_client()
+        await client.connect()
+        result = await client.health_check()
+        gateway_status = "healthy" if result.get("healthy") else "unhealthy"
+    except Exception:
+        gateway_status = "unhealthy"
     
     return HealthResponse(
         status="healthy" if db_status == "healthy" else "degraded",
         version=settings.APP_VERSION,
         database=db_status,
         redis=redis_status,
-        mqtt=mqtt_status
+        mqtt=gateway_status
     )
 
 

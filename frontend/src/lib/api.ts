@@ -160,6 +160,45 @@ class ApiClient {
       method: 'DELETE',
     });
   }
+
+  // Sensor Data (recorded data from Backend DB)
+  async getSensorData(params?: {
+    robot_id?: string;
+    start_time?: string;
+    end_time?: string;
+    skip?: number;
+    limit?: number;
+  }): Promise<{ total: number; records: SensorDataRecord[] }> {
+    const searchParams = new URLSearchParams();
+    if (params?.robot_id) searchParams.append('robot_id', params.robot_id);
+    if (params?.start_time) searchParams.append('start_time', params.start_time);
+    if (params?.end_time) searchParams.append('end_time', params.end_time);
+    if (params?.skip) searchParams.append('skip', params.skip.toString());
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+
+    const query = searchParams.toString();
+    return this.fetch(`/api/v1/sensor-data${query ? `?${query}` : ''}`);
+  }
+
+  async getSensorDataStats(): Promise<SensorDataStats[]> {
+    return this.fetch('/api/v1/sensor-data/stats');
+  }
+}
+
+export interface SensorDataRecord {
+  id: number;
+  robot_id: string;
+  recorded_at: string;
+  sensor_data: Record<string, number>;
+  control_data: Record<string, number>;
+  created_at: string;
+}
+
+export interface SensorDataStats {
+  robot_id: string;
+  total_records: number;
+  earliest: string | null;
+  latest: string | null;
 }
 
 export const api = new ApiClient();

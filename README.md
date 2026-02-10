@@ -19,7 +19,8 @@
 
 - **ロボット管理**: ロボットの登録・削除・状態監視
 - **ミッション管理**: タスクの作成・割り当て・進捗追跡
-- **リアルタイム監視**: WebSocket/MQTTによる状態更新
+- **リアルタイム監視**: Frontend↔Gateway直接WebSocket通信による低レイテンシ状態更新
+- **ML用データ記録**: センサ/制御値のON/OFF切替でDB保存（機械学習対応）
 - **マルチベンダー対応**: Adapterパターンによる異なるメーカーのロボット統合
 - **認証・認可**: JWT認証とRBACによるアクセス制御
 
@@ -28,7 +29,7 @@
 | コンポーネント | 技術 |
 |--------------|------|
 | Backend | Python 3.11, FastAPI 0.109, SQLAlchemy 2.0, gRPC |
-| Gateway | Go 1.21, gRPC, MQTT |
+| Gateway | Go 1.21, WebSocket, gRPC, MQTT |
 | Frontend | Next.js 14, React 18, TypeScript, TanStack Query |
 | Database | PostgreSQL 15, Redis 7 |
 | Message Broker | Eclipse Mosquitto (MQTT) |
@@ -40,29 +41,37 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                        Frontend                              │
 │                   (Next.js + React)                          │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ REST API / WebSocket
-┌─────────────────────────▼───────────────────────────────────┐
-│                        Backend                               │
-│                       (FastAPI)                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │   Auth   │  │  Robots  │  │ Missions │  │   Logs   │    │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ gRPC
-┌─────────────────────────▼───────────────────────────────────┐
-│                     Fleet Gateway                            │
-│                     (Go + gRPC)                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                   │
-│  │   FSM    │  │ Adapters │  │   MQTT   │                   │
-│  └──────────┘  └──────────┘  └──────────┘                   │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ MQTT
-┌─────────────────────────▼───────────────────────────────────┐
-│                        Robots                                │
-│           (Various Vendors via Adapter Pattern)              │
-└─────────────────────────────────────────────────────────────┘
+└───────┬───────────────────┬─────────────────────────────────┘
+        │ WebSocket             │ REST API
+        │ (リアルタイム操作)       │ (CRUD/認証/ML)
+        │                       │
+┌───────▼────────────┐  ┌────▼────────────────────────┐
+│  Fleet Gateway       │  │          Backend                  │
+│   (Go + WS/gRPC)    │  │         (FastAPI)                 │
+│ ┌─────┐ ┌─────┐    │  │ ┌─────┐ ┌─────┐ ┌────────┐   │
+│ │ WS  │ │MQTT │    │  │ │Auth │ │CRUD │ │ Sensor │   │
+│ └─────┘ └─────┘    │  │ └─────┘ └─────┘ │  Data  │   │
+│ ┌─────┐ ┌─────┐    │  │ ┌─────┐ ┌─────┐ │ Record │   │
+│ │ FSM │ │Adapt│    │  │ │Misn │ │ ML  │ └────────┘   │
+│ └─────┘ └─────┘    │  │ └─────┘ └─────┘             │
+└────────┬─────────────┘  └─────────┬───────────────────┘
+        │ MQTT                  │       ▲
+        │                 ┌────┴────┐ │ gRPC
+        │                 │PostgreSQL│ │ (データ記録転送)
+┌───────▼─────────────┐ │  Redis  │ │
+│       Robots        │ └─────────┘ │
+│  (Adapter Pattern)  │             │
+└─────────────────────┘   Gateway ──┘
 ```
+
+**ハイブリッド通信アーキテクチャ：**
+
+| 経路 | プロトコル | 用途 | 特性 |
+|------|------------|------|------|
+| Frontend ↔ Gateway | WebSocket | ロボット操作・リアルタイム状態・記録ON/OFF | 低レイテンシ |
+| Frontend ↔ Backend | REST | 認証・CRUD・ML・センサデータ照会 | ビジネスロジック |
+| Gateway → Backend | gRPC | センサ/制御値のDB保存転送 | 確実性重視 |
+| Gateway ↔ AMR | MQTT | ロボット制御 | ベンダー対応 |
 
 ### クラス図
 
@@ -75,14 +84,22 @@ classDiagram
         +Dashboard
         +RobotList
         +MissionPanel
-        +useWebSocket()
+        +RecordingToggle
+    }
+    
+    class useGatewayWS {
+        +sendCommand(robotId, cmd)
+        +setRecording(robotId, on/off)
+        +subscribe(robotIds)
+        +robotStatuses
+        +recordingState
     }
     
     %% Backend Layer
     class Backend {
         +FastAPI app
-        +handle_request()
-        +broadcast_event()
+        +REST API
+        +gRPC Server (DataRecording)
     }
     
     class AuthService {
@@ -93,8 +110,8 @@ classDiagram
     
     class RobotService {
         +get_robots()
-        +get_robot(id)
-        +update_robot_status()
+        +create_robot()
+        +delete_robot()
     }
     
     class MissionService {
@@ -103,19 +120,35 @@ classDiagram
         +update_progress()
     }
     
-    class GRPCClient {
-        +stream_robot_status()
-        +send_command()
-        +start_mission()
-        +cancel_mission()
+    class SensorDataService {
+        +get_sensor_data(filters)
+        +get_stats()
+        +record_batch(records)
+    }
+    
+    class DataRecordingServer {
+        +RecordSensorData(batch)
+        +StreamSensorData(stream)
     }
     
     %% Gateway Layer
     class FleetGateway {
+        +WebSocket Server
         +gRPC Server
-        +StreamRobotStatus()
-        +SendCommand()
-        +StartMission()
+        +handleMessage()
+    }
+    
+    class WSServer {
+        +HandleWebSocket()
+        +broadcastRobotStatus()
+        +handleCommand()
+        +handleSetRecording()
+    }
+    
+    class BackendForwarder {
+        -buffer[]
+        +ForwardSensorData()
+        +flush()
     }
     
     class RobotManager {
@@ -123,6 +156,7 @@ classDiagram
         +RegisterRobot()
         +GetRobot()
         +UpdateStatus()
+        +GetSensorData()
     }
     
     class StateMachine {
@@ -134,7 +168,6 @@ classDiagram
     class MQTTClient {
         +Subscribe(topic)
         +Publish(topic, message)
-        +handleMessage()
     }
     
     class RobotAdapter {
@@ -158,28 +191,28 @@ classDiagram
         +robots table
         +missions table
         +users table
-    }
-    
-    class Redis {
-        +cache
-        +session
+        +sensor_data_records table
     }
     
     %% Relationships
-    Frontend --> Backend : REST/WebSocket
+    Frontend --> useGatewayWS
+    useGatewayWS --> WSServer : WebSocket
+    Frontend --> Backend : REST API
+    
     Backend --> AuthService
     Backend --> RobotService
     Backend --> MissionService
-    Backend --> GRPCClient
+    Backend --> SensorDataService
+    Backend --> DataRecordingServer
     Backend --> PostgreSQL
-    Backend --> Redis
     
-    GRPCClient --> FleetGateway : gRPC
-    
+    FleetGateway --> WSServer
     FleetGateway --> RobotManager
     FleetGateway --> MQTTClient
-    RobotManager --> StateMachine
+    FleetGateway --> BackendForwarder
     
+    BackendForwarder --> DataRecordingServer : gRPC
+    RobotManager --> StateMachine
     MQTTClient --> RobotAdapter
     RobotAdapter <|.. MiRAdapter
     RobotAdapter <|.. CustomAdapter
@@ -194,24 +227,21 @@ sequenceDiagram
     autonumber
     participant U as User
     participant F as Frontend
-    participant B as Backend (FastAPI)
     participant G as Gateway (Go)
     participant M as MQTT Broker
     participant R as Robot
 
     U->>F: コマンド実行ボタンクリック
-    F->>B: POST /api/v1/robots/{id}/command
-    
-    Note over B: 認証・認可チェック
-    B->>B: JWT検証
-    
-    B->>G: gRPC SendCommand()
+    F->>G: WebSocket {type: "command", command: "move"}
     
     Note over G: コマンドをロボット形式に変換
     G->>G: Adapter.FormatCommand()
     
     G->>M: Publish fleet/{robot_id}/command
     M->>R: コマンド配信
+    
+    G-->>F: WebSocket {type: "command_response", success: true}
+    F-->>U: コマンド応答表示
     
     R->>M: Publish fleet/{robot_id}/status
     M->>G: ステータス受信
@@ -220,9 +250,55 @@ sequenceDiagram
     G->>G: Adapter.ParseStatus()
     G->>G: StateMachine.Transition()
     
-    G-->>B: gRPC StreamRobotStatus()
-    B-->>F: WebSocket ステータス更新
+    G-->>F: WebSocket {type: "robot_status", data: {...}}
     F-->>U: UI更新（リアルタイム）
+```
+
+#### データ記録フロー（ML用センサデータ保存）
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant F as Frontend
+    participant G as Gateway
+    participant B as Backend
+    participant DB as PostgreSQL
+    participant R as Robot
+
+    Note over U,F: 記録ONボタンを押下
+    U->>F: データ記録 ON
+    F->>G: WebSocket {type: "set_recording", robot_id: "R1", recording: true}
+    G-->>F: WebSocket {type: "recording_status", recording: true}
+    F-->>U: 記録中インジケータ点灯
+    
+    loop 記録中（リアルタイム）
+        R->>G: MQTT センサ/制御値
+        G-->>F: WebSocket {type: "robot_status", sensor_data: {...}}
+        F-->>U: リアルタイム表示
+        
+        Note over G: バッファリング
+        G->>G: buffer.append(record)
+        
+        alt バッファ満 or タイマー
+            G->>B: gRPC RecordSensorData(batch)
+            B->>DB: INSERT sensor_data_records
+            B-->>G: {success: true, recorded_count: N}
+        end
+    end
+    
+    U->>F: データ記録 OFF
+    F->>G: WebSocket {type: "set_recording", recording: false}
+    G->>G: 残りバッファをflush
+    G->>B: gRPC RecordSensorData(remaining)
+    B->>DB: INSERT
+    G-->>F: WebSocket {type: "recording_status", recording: false}
+    F-->>U: 記録停止
+    
+    Note over U,DB: 後日ML学習時
+    F->>B: GET /api/v1/sensor-data?robot_id=R1
+    B->>DB: SELECT * FROM sensor_data_records
+    B-->>F: センサデータ一覧
 ```
 
 #### ミッション実行フロー
@@ -247,7 +323,8 @@ sequenceDiagram
     F->>B: POST /api/v1/missions/{id}/assign
     B->>DB: UPDATE mission (robot_id)
     
-    B->>G: gRPC StartMission()
+    Note over F,G: ミッション開始はGatewayへ直接指示
+    F->>G: WebSocket {type: "command", command: "start_mission"}
     G->>G: RobotManager.GetRobot()
     G->>G: StateMachine.Transition(MISSION_START)
     
@@ -258,18 +335,18 @@ sequenceDiagram
         R->>M: Publish fleet/{robot_id}/status
         M->>G: ステータス受信
         G->>G: ステータス更新
-        G-->>B: gRPC StreamRobotStatus()
-        B->>DB: UPDATE mission (progress)
-        B-->>F: WebSocket 進捗更新
+        G-->>F: WebSocket ロボット状態
         F-->>U: プログレスバー更新
     end
     
     R->>M: ミッション完了通知
     M->>G: 完了ステータス
     G->>G: StateMachine.Transition(MISSION_COMPLETE)
-    G-->>B: ミッション完了
+    G-->>F: WebSocket 完了通知
+    
+    Note over F,B: 完了状態をBackendにDB保存
+    F->>B: PUT /api/v1/missions/{id} (status=completed)
     B->>DB: UPDATE mission (status=completed)
-    B-->>F: WebSocket 完了通知
     F-->>U: 完了表示
 ```
 
@@ -371,8 +448,16 @@ MQTT_BROKER_PORT=1883
 GRPC_PORT=50051
 GATEWAY_GRPC_ADDRESS=gateway:50051
 
+# Gateway (WebSocket for Frontend)
+WEBSOCKET_PORT=8082
+
+# Backend gRPC Server (data recording)
+BACKEND_GRPC_ADDRESS=backend:50052
+GRPC_SERVER_PORT=50052
+
 # Frontend
 NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_GATEWAY_WS_URL=ws://localhost:8082/ws
 ```
 
 ### 3. Docker Composeでの起動
@@ -422,6 +507,9 @@ go mod download
 export MQTT_BROKER_HOST="localhost"
 export MQTT_BROKER_PORT="1883"
 export GRPC_PORT="50051"
+export WEBSOCKET_PORT="8082"
+export JWT_SECRET_KEY="your-secret-key"
+export BACKEND_GRPC_ADDRESS="localhost:50052"
 
 # サーバー起動
 go run cmd/gateway/main.go
@@ -437,6 +525,7 @@ npm install
 
 # 環境変数の設定
 echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
+echo "NEXT_PUBLIC_GATEWAY_WS_URL=ws://localhost:8082/ws" >> .env.local
 
 # 開発サーバー起動
 npm run dev
@@ -468,7 +557,9 @@ docker-compose down -v
 | Frontend | http://localhost:3000 | Web UI |
 | Backend API | http://localhost:8000 | REST API |
 | API Docs | http://localhost:8000/docs | Swagger UI |
-| Gateway (gRPC) | localhost:50051 | Fleet Gateway gRPC |
+| Gateway (WebSocket) | ws://localhost:8082/ws | リアルタイム操作 |
+| Gateway (gRPC) | localhost:50051 | 内部通信 |
+| Backend (gRPC) | localhost:50052 | データ記録受信 |
 | PostgreSQL | localhost:5432 | Database |
 | Redis | localhost:6379 | Cache |
 | Mosquitto | localhost:1883 | MQTT Broker |
@@ -610,6 +701,28 @@ curl -X GET http://localhost:8000/api/v1/missions \
 | PUT | /api/v1/missions/{id} | ミッション更新 |
 | DELETE | /api/v1/missions/{id} | ミッション削除 |
 
+### センサデータエンドポイント
+
+| Method | Endpoint | 説明 |
+|--------|----------|------|
+| GET | /api/v1/sensor-data | センサデータ取得（フィルタ対応） |
+| GET | /api/v1/sensor-data/stats | ロボット別統計 |
+| DELETE | /api/v1/sensor-data/{robot_id} | センサデータ削除 |
+
+### Gateway WebSocket API
+
+接続先: `ws://localhost:8082/ws?token={JWT_TOKEN}`
+
+| メッセージタイプ | 方向 | 説明 |
+|----------------|------|------|
+| subscribe | Client → GW | ロボット状態購読 |
+| unsubscribe | Client → GW | 購読解除 |
+| command | Client → GW | ロボットコマンド送信 |
+| set_recording | Client → GW | データ記録ON/OFF |
+| robot_status | GW → Client | ロボット状態プッシュ |
+| command_response | GW → Client | コマンド結果 |
+| recording_status | GW → Client | 記録状態変更通知 |
+
 詳細なAPI仕様は http://localhost:8000/docs (Swagger UI) で確認できます。
 
 ## 🛠️ 開発ガイド
@@ -625,6 +738,8 @@ amr-saas-platform/
 │   │   ├── routers/        # APIエンドポイント
 │   │   ├── schemas/        # Pydantic スキーマ
 │   │   ├── services/       # ビジネスロジック
+│   │   ├── grpc_client/    # Gateway向けgRPCクライアント
+│   │   ├── grpc_server/    # データ記録受信gRPCサーバー
 │   │   ├── config.py       # 設定
 │   │   ├── database.py     # DB接続
 │   │   └── main.py         # アプリケーション
@@ -636,6 +751,8 @@ amr-saas-platform/
 │   ├── internal/
 │   │   ├── adapter/        # ベンダーアダプター
 │   │   ├── grpc/           # gRPCサーバー
+│   │   ├── websocket/      # WebSocketサーバー（Frontend向け）
+│   │   ├── forwarder/      # Backendデータ転送
 │   │   ├── config/         # 設定
 │   │   ├── mqtt/           # MQTTクライアント
 │   │   └── robot/          # ロボット管理・FSM
@@ -645,8 +762,8 @@ amr-saas-platform/
 │   ├── src/
 │   │   ├── app/            # App Router ページ
 │   │   ├── components/     # UIコンポーネント
-│   │   ├── hooks/          # カスタムフック
-│   │   ├── lib/            # ユーティリティ
+│   │   ├── hooks/          # カスタムフック (useGatewayWS等)
+│   │   ├── lib/            # APIクライアント
 │   │   └── types/          # TypeScript型定義
 │   ├── package.json
 │   └── Dockerfile

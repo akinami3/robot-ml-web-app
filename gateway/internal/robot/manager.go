@@ -298,3 +298,54 @@ func (m *Manager) SetCurrentMission(id, missionID string) error {
 	robot.CurrentMissionID = missionID
 	return nil
 }
+
+// SensorData stores for robots
+var (
+	sensorDataStore  = make(map[string]map[string]float64)
+	controlDataStore = make(map[string]map[string]float64)
+	sensorMu         sync.RWMutex
+)
+
+// UpdateSensorData updates sensor data for a robot
+func (m *Manager) UpdateSensorData(robotID string, data map[string]float64) {
+	sensorMu.Lock()
+	defer sensorMu.Unlock()
+	sensorDataStore[robotID] = data
+}
+
+// UpdateControlData updates control data for a robot
+func (m *Manager) UpdateControlData(robotID string, data map[string]float64) {
+	sensorMu.Lock()
+	defer sensorMu.Unlock()
+	controlDataStore[robotID] = data
+}
+
+// GetSensorData returns sensor data for a robot
+func (m *Manager) GetSensorData(robotID string) map[string]float64 {
+	sensorMu.RLock()
+	defer sensorMu.RUnlock()
+	if data, exists := sensorDataStore[robotID]; exists {
+		// Return a copy
+		result := make(map[string]float64)
+		for k, v := range data {
+			result[k] = v
+		}
+		return result
+	}
+	return nil
+}
+
+// GetControlData returns control data for a robot
+func (m *Manager) GetControlData(robotID string) map[string]float64 {
+	sensorMu.RLock()
+	defer sensorMu.RUnlock()
+	if data, exists := controlDataStore[robotID]; exists {
+		// Return a copy
+		result := make(map[string]float64)
+		for k, v := range data {
+			result[k] = v
+		}
+		return result
+	}
+	return nil
+}
