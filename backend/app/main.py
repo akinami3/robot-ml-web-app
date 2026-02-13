@@ -1,141 +1,123 @@
 """
-AMR SaaS Platform - Backend Main Application
+Robot AI Web Application - FastAPI Main Application
 """
+
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import redis.asyncio as redis
 
-import asyncio
+from .api.v1.router import api_router
+from .config import get_settings
+from .core.logging import setup_logging
+from .infrastructure.database.connection import close_db, get_engine, init_db
+from .infrastructure.redis.connection import close_redis, init_redis
 
-from app.config import get_settings
-from app.database import init_db
-from app.routers import auth_router, robots_router, missions_router, sensor_data_router, command_data_router
-from app.schemas import HealthResponse
-
-settings = get_settings()
-
-# Redis client
-redis_client = None
+logger = structlog.get_logger()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan events"""
-    global redis_client
-    
-    # Startup
-    print("Starting up...")
-    await init_db()
-    
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan - startup and shutdown."""
+    settings = get_settings()
+    setup_logging(settings.backend_log_level)
+
+    logger.info("Starting Robot AI Backend", environment=settings.environment)
+
+    # Initialize database
+    await init_db(settings)
+    logger.info("Database initialized")
+
     # Initialize Redis
+    redis_client = await init_redis(settings.redis_url)
+    logger.info("Redis connected")
+
+    # Start recording worker
+    from .infrastructure.redis.recording_worker import RecordingWorker
+    from .infrastructure.database.connection import get_session
+    from .infrastructure.database.repositories.recording_repo import (
+        SQLAlchemyRecordingRepository,
+    )
+    from .infrastructure.database.repositories.sensor_data_repo import (
+        SQLAlchemySensorDataRepository,
+    )
+    from .domain.services.recording_service import RecordingService
+
+    # Create a simple worker (simplified - in production you'd use proper DI)
+    worker = None
     try:
-        redis_client = redis.from_url(settings.REDIS_URL)
-        await redis_client.ping()
-        print("Redis connected")
+        # Get a session for the recording service
+        session_gen = get_session()
+        session = await session_gen.__anext__()
+        recording_repo = SQLAlchemyRecordingRepository(session)
+        sensor_repo = SQLAlchemySensorDataRepository(session)
+        recording_svc = RecordingService(recording_repo, sensor_repo)
+
+        worker = RecordingWorker(
+            redis_client=redis_client,
+            recording_service=recording_svc,
+        )
+        await worker.start()
+        logger.info("Recording worker started")
     except Exception as e:
-        print(f"Redis connection failed: {e}")
-        redis_client = None
-    
-    # Start gRPC server for data recording from Gateway
-    grpc_task = None
-    try:
-        from app.grpc_server import start_grpc_server
-        grpc_task = asyncio.create_task(start_grpc_server())
-        print(f"Data recording gRPC server started on port {settings.GRPC_SERVER_PORT}")
-    except Exception as e:
-        print(f"Failed to start gRPC server: {e}")
-    
+        logger.warning("Recording worker failed to start", error=str(e))
+
     yield
-    
+
     # Shutdown
-    print("Shutting down...")
-    if grpc_task:
-        grpc_task.cancel()
-    if redis_client:
-        await redis_client.close()
+    logger.info("Shutting down...")
+    if worker is not None:
+        await worker.stop()
+    await close_redis()
+    await close_db()
+    logger.info("Backend stopped")
 
 
-app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    description="AMR Fleet Management SaaS Platform API",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    lifespan=lifespan
-)
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    settings = get_settings()
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Include routers
-app.include_router(auth_router, prefix="/api/v1")
-app.include_router(robots_router, prefix="/api/v1")
-app.include_router(missions_router, prefix="/api/v1")
-app.include_router(sensor_data_router, prefix="/api/v1")
-app.include_router(command_data_router, prefix="/api/v1")
-
-
-@app.get("/", tags=["Root"])
-async def root():
-    """Root endpoint"""
-    return {
-        "name": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "docs": "/docs"
-    }
-
-
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def health_check():
-    """Health check endpoint"""
-    
-    # Check database
-    db_status = "healthy"
-    try:
-        from sqlalchemy import text
-        from app.database import AsyncSessionLocal
-        async with AsyncSessionLocal() as session:
-            await session.execute(text("SELECT 1"))
-    except Exception:
-        db_status = "unhealthy"
-    
-    # Check Redis
-    redis_status = "healthy"
-    try:
-        if redis_client:
-            await redis_client.ping()
-        else:
-            redis_status = "disconnected"
-    except Exception:
-        redis_status = "unhealthy"
-    
-    # Check Gateway via gRPC
-    gateway_status = "unknown"
-    try:
-        from app.grpc_client import get_gateway_client
-        client = get_gateway_client()
-        await client.connect()
-        result = await client.health_check()
-        gateway_status = "healthy" if result.get("healthy") else "unhealthy"
-    except Exception:
-        gateway_status = "unhealthy"
-    
-    return HealthResponse(
-        status="healthy" if db_status == "healthy" else "degraded",
-        version=settings.APP_VERSION,
-        database=db_status,
-        redis=redis_status,
-        mqtt=gateway_status
+    app = FastAPI(
+        title="Robot AI Web Application API",
+        description="API for robot control, sensor data management, ML datasets, and RAG",
+        version="0.1.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
+    # CORS
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    # API routes
+    app.include_router(api_router)
+
+    # Health check
+    @app.get("/health")
+    async def health_check() -> dict:
+        return {"status": "healthy", "service": "backend"}
+
+    @app.get("/ready")
+    async def readiness_check() -> dict:
+        try:
+            engine = get_engine()
+            async with engine.connect() as conn:
+                await conn.execute("SELECT 1")
+            return {"status": "ready"}
+        except Exception:
+            return {"status": "not_ready"}
+
+    return app
+
+
+app = create_app()

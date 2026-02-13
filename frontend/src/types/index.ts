@@ -1,189 +1,175 @@
-// Robot types
-export type RobotState = 'IDLE' | 'MOVING' | 'PAUSED' | 'ERROR' | 'CHARGING';
-export type RobotStatus = 'idle' | 'active' | 'charging' | 'error' | 'offline';
+/**
+ * Shared TypeScript types for the Robot AI Web Application.
+ */
 
-export interface Position {
-  x: number;
-  y: number;
-  theta?: number;
-}
+// ─── Auth ──────────────────────────────────────────────────────────────────
 
-export interface Capabilities {
-  supports_pause: boolean;
-  supports_docking: boolean;
-}
-
-export interface Robot {
-  id: number;
-  robot_id?: string;
-  name: string;
-  serial_number: string;
-  vendor: string;
-  model: string | null;
-  state?: RobotState;
-  status: RobotStatus;
-  battery: number;
-  pos_x?: number;
-  pos_y?: number;
-  pos_theta?: number;
-  position?: Position;
-  capabilities?: Capabilities | null;
-  is_online: boolean;
-  last_seen: string | null;
-  created_at: string;
-}
-
-export interface RobotCreate {
-  name: string;
-  serial_number: string;
-  model?: string;
-  vendor?: string;
-}
-
-export interface RobotListResponse {
-  total: number;
-  robots: Robot[];
-}
-
-// Mission types
-export type MissionStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled' | 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
-
-export interface Waypoint {
-  x: number;
-  y: number;
-  action?: string;
-}
-
-export interface Mission {
-  id: number;
-  mission_id?: string;
-  name: string;
-  description?: string;
-  robot_id: number;
-  status: MissionStatus;
-  priority?: number;
-  waypoints?: Waypoint[];
-  goal_x?: number;
-  goal_y?: number;
-  goal_theta?: number;
-  created_by?: number | null;
-  started_at?: string | null;
-  completed_at?: string | null;
-  created_at: string;
-}
-
-export type MissionListResponse = {
-  total: number;
-  missions: Mission[];
-};
-
-export interface MissionCreate {
-  name: string;
-  description?: string;
-  robot_id: number;
-  priority?: number;
-  waypoints: Waypoint[];
-}
-
-// User types
-export type UserRole = 'ADMIN' | 'OPERATOR' | 'VIEWER';
+export type UserRole = "admin" | "operator" | "viewer";
 
 export interface User {
-  id: number;
+  id: string;
+  username: string;
   email: string;
-  full_name: string | null;
   role: UserRole;
   is_active: boolean;
   created_at: string;
 }
 
-// Auth types
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
-
-export interface Token {
+export interface AuthTokens {
   access_token: string;
+  refresh_token: string;
   token_type: string;
+  expires_in: number;
 }
 
-// Command types
-export interface MoveCommand {
-  robot_id: string;
-  goal: Position;
-}
+// ─── Robot ─────────────────────────────────────────────────────────────────
 
-export interface CommandResponse {
-  success: boolean;
-  message: string;
-  command_id?: string;
-}
+export type RobotState =
+  | "disconnected"
+  | "connecting"
+  | "idle"
+  | "moving"
+  | "error"
+  | "emergency_stopped";
 
-// API Error
-export interface ApiError {
-  detail: string;
-}
-
-// Sensor Data Recording types
-export interface SensorDataRecord {
-  id: number;
-  robot_id: string;
-  recorded_at: string;
-  sensor_data: Record<string, number>;
-  control_data: Record<string, number>;
+export interface Robot {
+  id: string;
+  name: string;
+  adapter_type: string;
+  state: RobotState;
+  capabilities: string[];
+  battery_level: number | null;
+  last_seen: string | null;
   created_at: string;
 }
 
-export interface SensorDataStats {
+// ─── Sensor Data ───────────────────────────────────────────────────────────
+
+export type SensorType =
+  | "lidar"
+  | "camera"
+  | "imu"
+  | "odometry"
+  | "battery"
+  | "gps"
+  | "point_cloud"
+  | "joint_state";
+
+export interface SensorData {
+  id: string;
   robot_id: string;
-  total_records: number;
-  earliest: string | null;
-  latest: string | null;
-}
-
-// Command Data Recording types
-export interface CommandDataRecord {
-  id: number;
-  robot_id: string;
-  recorded_at: string;
-  command: string;
-  parameters: Record<string, number>;
-  user_id: string | null;
-  success: boolean;
-  error_message: string | null;
-  robot_state_before: Record<string, number>;
-  created_at: string;
-}
-
-export interface CommandDataStats {
-  robot_id: string;
-  total_commands: number;
-  earliest: string | null;
-  latest: string | null;
-  success_count: number;
-  failure_count: number;
-}
-
-export interface CommandTypeStats {
-  command: string;
-  count: number;
-  success_rate: number;
-}
-
-// ML Training Pair types
-export interface TrainingPair {
+  sensor_type: SensorType;
+  data: Record<string, unknown>;
   timestamp: string;
-  state: Record<string, number>;
-  action: {
-    command: string;
-    parameters: Record<string, number>;
-  };
-  user_id: string | null;
+  session_id: string | null;
+  sequence_number: number;
 }
 
-export interface TrainingPairsResponse {
+// ─── WebSocket Messages ────────────────────────────────────────────────────
+
+export type WSMessageType =
+  | "auth"
+  | "auth_response"
+  | "ping"
+  | "pong"
+  | "velocity_cmd"
+  | "nav_goal"
+  | "nav_cancel"
+  | "estop"
+  | "estop_response"
+  | "lock_acquire"
+  | "lock_release"
+  | "lock_response"
+  | "sensor_data"
+  | "robot_status"
+  | "error";
+
+export interface WSMessage {
+  type: WSMessageType;
+  robot_id?: string;
+  payload: Record<string, unknown>;
+  timestamp?: number;
+}
+
+export interface VelocityCommand {
+  linear_x: number;
+  linear_y: number;
+  angular_z: number;
+}
+
+export interface NavigationGoal {
+  x: number;
+  y: number;
+  theta: number;
+}
+
+// ─── Dataset ───────────────────────────────────────────────────────────────
+
+export interface Dataset {
+  id: string;
+  name: string;
+  description: string;
+  owner_id: string;
+  status: string;
+  sensor_types: string[];
+  robot_ids: string[];
+  start_time: string | null;
+  end_time: string | null;
+  record_count: number;
+  size_bytes: number;
+  tags: string[];
+  created_at: string;
+}
+
+// ─── Recording ─────────────────────────────────────────────────────────────
+
+export interface RecordingSession {
+  id: string;
   robot_id: string;
-  total_pairs: number;
-  pairs: TrainingPair[];
+  user_id: string;
+  is_active: boolean;
+  record_count: number;
+  size_bytes: number;
+  started_at: string;
+  stopped_at: string | null;
+  config: {
+    sensor_types: string[];
+    enabled: boolean;
+  };
+}
+
+// ─── RAG ───────────────────────────────────────────────────────────────────
+
+export interface RAGDocument {
+  id: string;
+  title: string;
+  source: string;
+  file_type: string;
+  file_size: number;
+  chunk_count: number;
+  created_at: string;
+}
+
+export interface RAGQueryResult {
+  answer: string;
+  sources: Array<{
+    chunk_id: string;
+    document_id: string;
+    similarity: number;
+    preview: string;
+  }>;
+  context_used: boolean;
+}
+
+// ─── Audit ─────────────────────────────────────────────────────────────────
+
+export interface AuditLog {
+  id: string;
+  user_id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  details: Record<string, unknown>;
+  ip_address: string;
+  timestamp: string;
 }

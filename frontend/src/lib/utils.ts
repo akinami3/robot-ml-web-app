@@ -1,66 +1,37 @@
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(dateString: string | null): string {
-  if (!dateString) return '-';
-  return new Date(dateString).toLocaleString();
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-export function formatBattery(battery: number): string {
-  return `${Math.round(battery)}%`;
+export function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
-export function getStateColor(state: string): string {
+export function robotStateColor(state: string): string {
   switch (state) {
-    case 'IDLE':
-      return 'bg-gray-500';
-    case 'MOVING':
-      return 'bg-green-500';
-    case 'PAUSED':
-      return 'bg-yellow-500';
-    case 'ERROR':
-      return 'bg-red-500';
-    case 'CHARGING':
-      return 'bg-blue-500';
+    case "idle":
+      return "text-robot-idle";
+    case "moving":
+      return "text-robot-moving";
+    case "error":
+    case "emergency_stopped":
+      return "text-robot-error";
     default:
-      return 'bg-gray-400';
-  }
-}
-
-export function getStatusColor(status: string): string {
-  switch (status) {
-    case 'idle':
-      return 'bg-gray-500';
-    case 'active':
-      return 'bg-green-500';
-    case 'charging':
-      return 'bg-blue-500';
-    case 'error':
-      return 'bg-red-500';
-    case 'offline':
-      return 'bg-gray-400';
-    default:
-      return 'bg-gray-400';
-  }
-}
-
-export function getMissionStatusColor(status: string): string {
-  switch (status) {
-    case 'PENDING':
-      return 'bg-gray-500';
-    case 'IN_PROGRESS':
-      return 'bg-blue-500';
-    case 'COMPLETED':
-      return 'bg-green-500';
-    case 'FAILED':
-      return 'bg-red-500';
-    case 'CANCELLED':
-      return 'bg-yellow-500';
-    default:
-      return 'bg-gray-400';
+      return "text-robot-disconnected";
   }
 }

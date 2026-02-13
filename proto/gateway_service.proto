@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package robotai;
+
+option go_package = "github.com/robot-ai-webapp/gateway/internal/bridge/proto";
+
+import "google/protobuf/timestamp.proto";
+import "sensor.proto";
+import "command.proto";
+
+// =============================================================================
+// Gateway Service - Backend ↔ Gateway gRPC communication
+// =============================================================================
+
+service GatewayService {
+  // Send a command to a robot via the gateway
+  rpc SendCommand(RobotCommand) returns (CommandAck);
+
+  // Emergency stop a specific robot
+  rpc EmergencyStopRobot(EmergencyStopRequest) returns (EmergencyStopResponse);
+
+  // Emergency stop ALL robots
+  rpc EmergencyStopAll(EmergencyStopAllRequest) returns (EmergencyStopAllResponse);
+
+  // Get current robot status
+  rpc GetRobotStatus(GetRobotStatusRequest) returns (RobotStatus);
+
+  // List all connected robots
+  rpc ListConnectedRobots(ListConnectedRobotsRequest) returns (ListConnectedRobotsResponse);
+
+  // Stream sensor data from a robot
+  rpc StreamSensorData(StreamSensorDataRequest) returns (stream SensorData);
+
+  // Operation lock management
+  rpc AcquireOperationLock(OperationLockRequest) returns (OperationLockResponse);
+  rpc ReleaseOperationLock(OperationUnlockRequest) returns (CommandAck);
+}
+
+// =============================================================================
+// Service Request/Response Messages
+// =============================================================================
+
+message EmergencyStopRequest {
+  string robot_id = 1;
+  string user_id = 2;
+  string reason = 3;
+}
+
+message EmergencyStopResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message EmergencyStopAllRequest {
+  string user_id = 1;
+  string reason = 2;
+}
+
+message EmergencyStopAllResponse {
+  bool success = 1;
+  int32 robots_stopped = 2;
+  repeated string failed_robot_ids = 3;
+  string message = 4;
+}
+
+message GetRobotStatusRequest {
+  string robot_id = 1;
+}
+
+message ListConnectedRobotsRequest {}
+
+message ListConnectedRobotsResponse {
+  repeated RobotStatus robots = 1;
+}
+
+message StreamSensorDataRequest {
+  string robot_id = 1;
+  repeated string topics = 2;  // Empty = all topics
+}

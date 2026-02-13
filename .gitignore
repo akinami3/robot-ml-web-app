@@ -1,0 +1,71 @@
+# =============================================================================
+# Robot AI Web Application - .gitignore
+# =============================================================================
+
+# Environment
+.env
+*.pem
+keys/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Go
+gateway/vendor/
+gateway/tmp/
+
+# Node.js / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+data/logs/
+
+# Uploads & Data
+uploads/
+data/models/
+data/datasets/*.parquet
+data/datasets/*.csv
+backups/
+
+# Generated
+backend/app/infrastructure/grpc/proto/*_pb2*.py
+gateway/internal/bridge/proto/*.pb.go
+
+# MkDocs
+docs/site/
+
+# Coverage reports
+coverage/

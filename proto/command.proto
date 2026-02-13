@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package robotai;
+
+option go_package = "github.com/robot-ai-webapp/gateway/internal/bridge/proto";
+
+import "google/protobuf/timestamp.proto";
+import "sensor.proto";
+
+// =============================================================================
+// Robot Command Messages
+// =============================================================================
+
+// Velocity command (manual control)
+message VelocityCommand {
+  double linear_x = 1;
+  double linear_y = 2;
+  double angular_z = 3;
+}
+
+// Navigation goal
+message NavigationGoal {
+  Pose goal_pose = 1;
+  string frame_id = 2;
+  double tolerance_position = 3;
+  double tolerance_orientation = 4;
+}
+
+// Navigation cancel
+message NavigationCancel {}
+
+// Waypoint navigation
+message WaypointNavigation {
+  repeated Pose waypoints = 1;
+  string frame_id = 2;
+  bool loop = 3;
+}
+
+// Emergency stop
+message EmergencyStop {
+  bool activate = 1;  // true = stop, false = release
+  string reason = 2;
+}
+
+// =============================================================================
+// Command Envelope
+// =============================================================================
+
+message RobotCommand {
+  string robot_id = 1;
+  string user_id = 2;
+  string command_id = 3;
+  google.protobuf.Timestamp timestamp = 4;
+
+  oneof command {
+    VelocityCommand velocity = 10;
+    NavigationGoal navigation_goal = 11;
+    NavigationCancel navigation_cancel = 12;
+    WaypointNavigation waypoint_navigation = 13;
+    EmergencyStop emergency_stop = 14;
+  }
+}
+
+// Command acknowledgement
+message CommandAck {
+  string command_id = 1;
+  string robot_id = 2;
+  bool success = 3;
+  string error_message = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+// =============================================================================
+// Robot Status
+// =============================================================================
+
+enum RobotState {
+  ROBOT_STATE_UNKNOWN = 0;
+  ROBOT_STATE_IDLE = 1;
+  ROBOT_STATE_MANUAL_CONTROL = 2;
+  ROBOT_STATE_NAVIGATING = 3;
+  ROBOT_STATE_EMERGENCY_STOP = 4;
+  ROBOT_STATE_ERROR = 5;
+  ROBOT_STATE_DISCONNECTED = 6;
+}
+
+message RobotStatus {
+  string robot_id = 1;
+  RobotState state = 2;
+  BatteryState battery = 3;
+  Odometry current_pose = 4;
+  string active_user_id = 5;  // Who has operation lock
+  bool estop_active = 6;
+  google.protobuf.Timestamp timestamp = 7;
+  map<string, string> metadata = 8;
+}
+
+// =============================================================================
+// Operation Lock
+// =============================================================================
+
+message OperationLockRequest {
+  string robot_id = 1;
+  string user_id = 2;
+}
+
+message OperationLockResponse {
+  bool granted = 1;
+  string locked_by_user_id = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  string message = 4;
+}
+
+message OperationUnlockRequest {
+  string robot_id = 1;
+  string user_id = 2;
+}

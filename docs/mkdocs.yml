@@ -1,0 +1,76 @@
+site_name: Robot AI Web App - Design Documentation
+site_description: Architecture and design documentation for the Robot AI Web Application
+site_author: Robot AI Team
+repo_url: https://github.com/your-org/robot-ml-web-app
+repo_name: robot-ml-web-app
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - toc.integrate
+    - search.suggest
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mermaid2
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - admonition
+  - tables
+  - attr_list
+  - def_list
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Data Flow: architecture/data-flow.md
+      - Safety Features: architecture/safety.md
+  - API:
+      - REST API: api/rest-api.md
+      - WebSocket Protocol: api/websocket.md
+      - gRPC Services: api/grpc.md
+  - Deployment:
+      - Docker Setup: deployment/docker.md
+      - Production Guide: deployment/production.md
+  - ADR:
+      - "001: Frontend Framework": adr/001-frontend-framework.md
+      - "002: Backend Framework": adr/002-backend-framework.md
+      - "003: Gateway Language": adr/003-gateway-language.md
+      - "004: Database Selection": adr/004-database.md
+      - "005: Local LLM": adr/005-local-llm.md
+  - Future: future/roadmap.md

@@ -1,137 +1,192 @@
-version: '3.8'
+# =============================================================================
+# Robot AI Web Application - Docker Compose (Base Configuration)
+# =============================================================================
+# Usage:
+#   Development: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#   Production:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
-  # ===========================================
-  # Infrastructure Services
-  # ===========================================
-  
-  postgres:
-    image: postgres:15-alpine
-    container_name: amr-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-amr_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-amr_password}
-      POSTGRES_DB: ${POSTGRES_DB:-amr_db}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-amr_user} -d ${POSTGRES_DB:-amr_db}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # ---------------------------------------------------------------------------
+  # Frontend - React + TypeScript (Nginx in production)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
     networks:
-      - amr-network
+      - frontend-network
+    restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    container_name: amr-redis
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - amr-network
-
-  mosquitto:
-    image: eclipse-mosquitto:2
-    container_name: amr-mosquitto
-    volumes:
-      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - mosquitto_data:/mosquitto/data
-      - mosquitto_log:/mosquitto/log
-    ports:
-      - "1884:1883"
-      - "9001:9001"
-    networks:
-      - amr-network
-
-  # ===========================================
-  # Application Services
-  # ===========================================
-
+  # ---------------------------------------------------------------------------
+  # Backend - FastAPI (Python)
+  # ---------------------------------------------------------------------------
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: amr-backend
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://amr_user:amr_password@postgres:5432/amr_db}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-this-in-production}
-      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
-      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
-      GATEWAY_GRPC_ADDRESS: ${GATEWAY_GRPC_ADDRESS:-gateway:50051}
-      GRPC_SERVER_PORT: ${GRPC_SERVER_PORT:-50052}
     ports:
-      - "8000:8000"
-      - "50052:50052"
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:${REDIS_PORT:-6379}/0
+      - OLLAMA_BASE_URL=http://ollama:${OLLAMA_PORT:-11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3}
+      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-RS256}
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      - JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
+      - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme123}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
+      - GATEWAY_GRPC_HOST=gateway
+      - GATEWAY_GRPC_PORT=${GATEWAY_GRPC_PORT:-50051}
+      - RAG_CHUNK_SIZE=${RAG_CHUNK_SIZE:-500}
+      - RAG_CHUNK_OVERLAP=${RAG_CHUNK_OVERLAP:-100}
+      - RAG_TOP_K=${RAG_TOP_K:-5}
+    volumes:
+      - ./keys:/app/keys:ro
+      - backend-uploads:/app/uploads
+      - backend-data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
-      - amr-network
+      - frontend-network
+      - backend-network
+    restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Gateway - Go WebSocket Server
+  # ---------------------------------------------------------------------------
   gateway:
     build:
       context: ./gateway
       dockerfile: Dockerfile
-    container_name: amr-gateway
-    environment:
-      MQTT_BROKER_HOST: ${MQTT_BROKER_HOST:-mosquitto}
-      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT:-1883}
-      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-amr-gateway}
-      GRPC_PORT: "50051"
-      WEBSOCKET_PORT: "8082"
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-this-in-production}
-      BACKEND_GRPC_ADDRESS: ${BACKEND_GRPC_ADDRESS:-backend:50052}
     ports:
-      - "50051:50051"
-      - "8082:8082"
-    depends_on:
-      - mosquitto
-      - backend
-    networks:
-      - amr-network
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_GATEWAY_WS_URL: ${NEXT_PUBLIC_GATEWAY_WS_URL:-ws://localhost:8082/ws}
-    container_name: amr-frontend
+      - "${GATEWAY_PORT:-8080}:8080"
+      - "${GATEWAY_GRPC_PORT:-50051}:50051"
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      NEXT_PUBLIC_GATEWAY_WS_URL: ${NEXT_PUBLIC_GATEWAY_WS_URL:-ws://localhost:8082/ws}
-    ports:
-      - "3000:3000"
+      - GATEWAY_PORT=8080
+      - GATEWAY_GRPC_PORT=50051
+      - GATEWAY_LOG_LEVEL=${GATEWAY_LOG_LEVEL:-debug}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:${REDIS_PORT:-6379}/0
+      - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
+      - GATEWAY_ESTOP_ENABLED=${GATEWAY_ESTOP_ENABLED:-true}
+      - GATEWAY_CMD_TIMEOUT_SEC=${GATEWAY_CMD_TIMEOUT_SEC:-3}
+      - GATEWAY_MAX_LINEAR_VEL=${GATEWAY_MAX_LINEAR_VEL:-1.0}
+      - GATEWAY_MAX_ANGULAR_VEL=${GATEWAY_MAX_ANGULAR_VEL:-2.0}
+      - GATEWAY_OPERATION_LOCK_TIMEOUT_SEC=${GATEWAY_OPERATION_LOCK_TIMEOUT_SEC:-300}
+    volumes:
+      - ./keys:/app/keys:ro
     depends_on:
-      - backend
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
-      - amr-network
+      - frontend-network
+      - backend-network
+    restart: unless-stopped
 
-volumes:
-  postgres_data:
-  redis_data:
-  mosquitto_data:
-  mosquitto_log:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL + TimescaleDB + pgvector
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-robot_app}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-robot_app_password_change_me}
+      - POSTGRES_DB=${POSTGRES_DB:-robot_ai_db}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-robot_app} -d ${POSTGRES_DB:-robot_ai_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend-network
+    restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Redis (Streams + Cache)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-redis_password_change_me}
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_password_change_me}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - backend-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Ollama (Local LLM)
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - backend-network
+    restart: unless-stopped
+
+# =============================================================================
+# Networks
+# =============================================================================
 networks:
-  amr-network:
+  frontend-network:
     driver: bridge
+  backend-network:
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres-data:
+  redis-data:
+  ollama-data:
+  backend-uploads:
+  backend-data:

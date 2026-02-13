@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package robotai;
+
+option go_package = "github.com/robot-ai-webapp/gateway/internal/bridge/proto";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Sensor Data Messages
+// =============================================================================
+
+// Common header for all sensor messages
+message SensorHeader {
+  string robot_id = 1;
+  string topic = 2;
+  string frame_id = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  uint64 sequence = 5;
+}
+
+// 2D LiDAR scan
+message LaserScan {
+  SensorHeader header = 1;
+  float angle_min = 2;
+  float angle_max = 3;
+  float angle_increment = 4;
+  float time_increment = 5;
+  float scan_time = 6;
+  float range_min = 7;
+  float range_max = 8;
+  repeated float ranges = 9;
+  repeated float intensities = 10;
+}
+
+// 3D Point Cloud
+message PointCloud {
+  SensorHeader header = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  repeated PointField fields = 4;
+  bool is_bigendian = 5;
+  uint32 point_step = 6;
+  uint32 row_step = 7;
+  bytes data = 8;
+  bool is_dense = 9;
+}
+
+message PointField {
+  string name = 1;
+  uint32 offset = 2;
+  uint32 datatype = 3;
+  uint32 count = 4;
+}
+
+// IMU data
+message Imu {
+  SensorHeader header = 1;
+  Quaternion orientation = 2;
+  repeated double orientation_covariance = 3;
+  Vector3 angular_velocity = 4;
+  repeated double angular_velocity_covariance = 5;
+  Vector3 linear_acceleration = 6;
+  repeated double linear_acceleration_covariance = 7;
+}
+
+// Camera image (compressed)
+message CompressedImage {
+  SensorHeader header = 1;
+  string format = 2;  // jpeg, png
+  bytes data = 3;
+}
+
+// Odometry
+message Odometry {
+  SensorHeader header = 1;
+  string child_frame_id = 2;
+  Pose pose = 3;
+  repeated double pose_covariance = 4;
+  Twist twist = 5;
+  repeated double twist_covariance = 6;
+}
+
+// Battery status
+message BatteryState {
+  SensorHeader header = 1;
+  float voltage = 2;
+  float current = 3;
+  float charge = 4;
+  float capacity = 5;
+  float percentage = 6;
+  uint32 power_supply_status = 7;
+}
+
+// GPS
+message NavSatFix {
+  SensorHeader header = 1;
+  double latitude = 2;
+  double longitude = 3;
+  double altitude = 4;
+  repeated double position_covariance = 5;
+  uint32 position_covariance_type = 6;
+}
+
+// =============================================================================
+// Geometry Types
+// =============================================================================
+
+message Vector3 {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+
+message Quaternion {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+  double w = 4;
+}
+
+message Pose {
+  Vector3 position = 1;
+  Quaternion orientation = 2;
+}
+
+message Twist {
+  Vector3 linear = 1;
+  Vector3 angular = 2;
+}
+
+// =============================================================================
+// Unified Sensor Data Envelope
+// =============================================================================
+
+message SensorData {
+  SensorHeader header = 1;
+  oneof data {
+    LaserScan laser_scan = 10;
+    PointCloud point_cloud = 11;
+    Imu imu = 12;
+    CompressedImage compressed_image = 13;
+    Odometry odometry = 14;
+    BatteryState battery_state = 15;
+    NavSatFix nav_sat_fix = 16;
+  }
+}
+
+// Batch of sensor data
+message SensorDataBatch {
+  repeated SensorData items = 1;
+}

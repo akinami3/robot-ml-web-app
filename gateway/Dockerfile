@@ -1,47 +1,33 @@
-FROM golang:1.21-alpine AS builder
+# =============================================================================
+# Gateway - Production Dockerfile (Multi-stage)
+# =============================================================================
+FROM golang:1.22-alpine AS builder
 
-WORKDIR /app
+WORKDIR /build
 
 # Install dependencies
-RUN apk add --no-cache git protobuf
+RUN apk add --no-cache git ca-certificates
 
-# Install protoc-gen-go and protoc-gen-go-grpc
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.32.0 && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0
-
-# Copy go mod files
-COPY go.mod ./
+# Copy go.mod and go.sum first for caching
+COPY go.mod go.sum ./
+RUN go mod download
 
 # Copy source code
 COPY . .
 
-# Generate protobuf code from main proto definition
-RUN protoc --go_out=. --go_opt=paths=source_relative \
-    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-    proto/fleet.proto
+# Build
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o gateway ./cmd/gateway/
 
-# Download dependencies and generate go.sum
-RUN go mod tidy
-
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o /gateway ./cmd/gateway
-
-# Final stage
-FROM alpine:3.19
-
-RUN apk --no-cache add ca-certificates tzdata
+# =============================================================================
+# Runtime stage - minimal image
+# =============================================================================
+FROM gcr.io/distroless/static-debian12
 
 WORKDIR /app
+COPY --from=builder /build/gateway /app/gateway
 
-# Copy binary from builder
-COPY --from=builder /gateway .
+USER nonroot:nonroot
 
-# Create non-root user
-RUN adduser -D -g '' appuser
-USER appuser
+EXPOSE 8080 50051
 
-# Expose gRPC and WebSocket ports
-EXPOSE 50051 8082
-
-# Run the application
-CMD ["./gateway"]
+ENTRYPOINT ["/app/gateway"]

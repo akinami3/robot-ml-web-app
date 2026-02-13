@@ -1,36 +1,33 @@
-FROM python:3.11-slim
+# ─── Build Stage ──────────────────────────────────────────────
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml .
+COPY app/ ./app/
+RUN pip install --no-cache-dir --prefix=/install .
 
-# Copy application code
+# ─── Runtime Stage ────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+WORKDIR /app
+
+COPY --from=builder /install /usr/local
 COPY . .
 
-# Generate Python protobuf code from fleet.proto
-RUN python -m grpc_tools.protoc \
-    -I./proto \
-    --python_out=./app/grpc_client \
-    --grpc_python_out=./app/grpc_client \
-    ./proto/fleet.proto
+# Create necessary directories
+RUN mkdir -p /app/keys /tmp/exports && \
+    chown -R appuser:appuser /app /tmp/exports
 
-# Fix import path in generated grpc file (fleet_pb2 -> .fleet_pb2 for package import)
-RUN sed -i 's/^import fleet_pb2 as fleet__pb2$/from . import fleet_pb2 as fleet__pb2/' app/grpc_client/fleet_pb2_grpc.py
-
-# Create non-root user
-RUN adduser --disabled-password --gecos '' appuser && chown -R appuser /app
 USER appuser
 
-# Expose ports (REST API + gRPC data recording)
-EXPOSE 8000 50052
+EXPOSE 8000
 
-# Run the application
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import httpx; r = httpx.get('http://localhost:8000/health'); r.raise_for_status()" || exit 1
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
