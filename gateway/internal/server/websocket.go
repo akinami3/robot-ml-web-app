@@ -118,11 +118,11 @@ type WebSocketServer struct {
 // WebSocketサーバーを初期化して返します。
 //
 // 【websocket.Upgrader の設定】
-// - ReadBufferSize/WriteBufferSize: 読み書きバッファのサイズ（バイト単位）
-//   4096バイト（4KB）は一般的なメッセージサイズに十分です。
-// - CheckOrigin: CORS（クロスオリジン）チェック関数
-//   開発環境では全てのオリジンを許可（return true）しています。
-//   本番環境ではセキュリティのため、特定のオリジンのみ許可すべきです。
+//   - ReadBufferSize/WriteBufferSize: 読み書きバッファのサイズ（バイト単位）
+//     4096バイト（4KB）は一般的なメッセージサイズに十分です。
+//   - CheckOrigin: CORS（クロスオリジン）チェック関数
+//     開発環境では全てのオリジンを許可（return true）しています。
+//     本番環境ではセキュリティのため、特定のオリジンのみ許可すべきです。
 func NewWebSocketServer(hub *Hub, handler *Handler, logger *zap.Logger) *WebSocketServer {
 	return &WebSocketServer{
 		hub:     hub,

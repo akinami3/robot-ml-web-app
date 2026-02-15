@@ -28,27 +28,27 @@
 package safety
 
 import (
-// context: コンテキスト管理パッケージ
-// ゴルーチンのキャンセル制御に使います。
-// WithCancel() で作ったコンテキストをキャンセルすると、
-// そのコンテキストを使っているゴルーチンを停止できます。
-"context"
+	// context: コンテキスト管理パッケージ
+	// ゴルーチンのキャンセル制御に使います。
+	// WithCancel() で作ったコンテキストをキャンセルすると、
+	// そのコンテキストを使っているゴルーチンを停止できます。
+	"context"
 
-// sync: 同期プリミティブパッケージ
-// RWMutexで lastCommand map への安全なアクセスを提供します。
-"sync"
+	// sync: 同期プリミティブパッケージ
+	// RWMutexで lastCommand map への安全なアクセスを提供します。
+	"sync"
 
-// time: 時刻・期間管理パッケージ
-// Ticker（定期タイマー）でタイムアウトの定期チェックを行います。
-"time"
+	// time: 時刻・期間管理パッケージ
+	// Ticker（定期タイマー）でタイムアウトの定期チェックを行います。
+	"time"
 
-// adapter: ロボットアダプターパッケージ（自作）
-// タイムアウト時にロボットへ停止コマンドを送信するために使います。
-"github.com/robot-ai-webapp/gateway/internal/adapter"
+	// adapter: ロボットアダプターパッケージ（自作）
+	// タイムアウト時にロボットへ停止コマンドを送信するために使います。
+	"github.com/robot-ai-webapp/gateway/internal/adapter"
 
-// zap: 高性能ロガー
-// タイムアウトの検出や自動停止のイベントをログに記録します。
-"go.uber.org/zap"
+	// zap: 高性能ロガー
+	// タイムアウトの検出や自動停止のイベントをログに記録します。
+	"go.uber.org/zap"
 )
 
 // =============================================================================
@@ -59,49 +59,49 @@ import (
 // 各ロボットへの最後のコマンド送信時刻を追跡し、
 // タイムアウトを検出したら自動的にロボットを停止させます。
 type TimeoutWatchdog struct {
-// mu: 読み書きロック
-// lastCommand mapへの同時アクセスを安全にします。
-mu sync.RWMutex
+	// mu: 読み書きロック
+	// lastCommand mapへの同時アクセスを安全にします。
+	mu sync.RWMutex
 
-// lastCommand: 各ロボットへの最後のコマンド送信時刻
-// map[string]time.Time: ロボットID → 最後のコマンド時刻
-// 例: {"robot_001": 2026-02-15 14:30:00, "robot_002": 2026-02-15 14:29:55}
-lastCommand map[string]time.Time // robot_id -> last command time
+	// lastCommand: 各ロボットへの最後のコマンド送信時刻
+	// map[string]time.Time: ロボットID → 最後のコマンド時刻
+	// 例: {"robot_001": 2026-02-15 14:30:00, "robot_002": 2026-02-15 14:29:55}
+	lastCommand map[string]time.Time // robot_id -> last command time
 
-// timeout: タイムアウト期間
-// この時間以上コマンドがないロボットは自動停止されます。
-// 例: 3 * time.Second（3秒）
-timeout time.Duration
+	// timeout: タイムアウト期間
+	// この時間以上コマンドがないロボットは自動停止されます。
+	// 例: 3 * time.Second（3秒）
+	timeout time.Duration
 
-// registry: アダプターレジストリ
-// タイムアウト時にロボットに停止コマンドを送るために使います。
-registry *adapter.Registry
+	// registry: アダプターレジストリ
+	// タイムアウト時にロボットに停止コマンドを送るために使います。
+	registry *adapter.Registry
 
-// logger: ログ出力用のロガー
-logger *zap.Logger
+	// logger: ログ出力用のロガー
+	logger *zap.Logger
 
-// cancelFunc: ウォッチドッグの停止用関数
-//
-// 【context.CancelFunc とは？】
-// context.WithCancel() で作られたキャンセル関数です。
-// この関数を呼ぶと、関連するコンテキストがキャンセルされ、
-// そのコンテキストを使っている処理（ゴルーチン）が停止します。
-//
-// 型は func() で、引数なし・戻り値なしの関数型です。
-// Goでは関数も「値」として変数に代入できます（第一級関数）。
-cancelFunc context.CancelFunc
+	// cancelFunc: ウォッチドッグの停止用関数
+	//
+	// 【context.CancelFunc とは？】
+	// context.WithCancel() で作られたキャンセル関数です。
+	// この関数を呼ぶと、関連するコンテキストがキャンセルされ、
+	// そのコンテキストを使っている処理（ゴルーチン）が停止します。
+	//
+	// 型は func() で、引数なし・戻り値なしの関数型です。
+	// Goでは関数も「値」として変数に代入できます（第一級関数）。
+	cancelFunc context.CancelFunc
 
-// onTimeout: タイムアウト発生時のコールバック関数
-//
-// 【コールバック関数とは？】
-// 「何かが起きた時に呼び出してほしい関数」を事前に登録しておく仕組みです。
-//
-// func(robotID string) は「string型の引数を1つ取り、戻り値なし」の関数型です。
-// この関数はタイムアウトが発生した時に呼ばれ、robotIDが渡されます。
-//
-// 例えば、「タイムアウトしたらWebSocketで通知を送る」という処理を
-// コールバックとして登録できます。
-onTimeout func(robotID string) // callback when timeout triggers
+	// onTimeout: タイムアウト発生時のコールバック関数
+	//
+	// 【コールバック関数とは？】
+	// 「何かが起きた時に呼び出してほしい関数」を事前に登録しておく仕組みです。
+	//
+	// func(robotID string) は「string型の引数を1つ取り、戻り値なし」の関数型です。
+	// この関数はタイムアウトが発生した時に呼ばれ、robotIDが渡されます。
+	//
+	// 例えば、「タイムアウトしたらWebSocketで通知を送る」という処理を
+	// コールバックとして登録できます。
+	onTimeout func(robotID string) // callback when timeout triggers
 }
 
 // =============================================================================
@@ -121,17 +121,17 @@ onTimeout func(robotID string) // callback when timeout triggers
 // 監視を開始するには、別途 Start() メソッドを呼ぶ必要があります。
 // これは「初期化」と「開始」を分離する設計パターンです。
 func NewTimeoutWatchdog(
-timeout time.Duration,
-registry *adapter.Registry,
-logger *zap.Logger,
+	timeout time.Duration,
+	registry *adapter.Registry,
+	logger *zap.Logger,
 ) *TimeoutWatchdog {
-return &TimeoutWatchdog{
-// make(map[...]): mapの初期化
-lastCommand: make(map[string]time.Time),
-timeout:     timeout,
-registry:    registry,
-logger:      logger,
-}
+	return &TimeoutWatchdog{
+		// make(map[...]): mapの初期化
+		lastCommand: make(map[string]time.Time),
+		timeout:     timeout,
+		registry:    registry,
+		logger:      logger,
+	}
 }
 
 // =============================================================================
@@ -142,17 +142,18 @@ logger:      logger,
 // タイムアウトが発生した時に追加で実行したい処理を登録します。
 //
 // 使用例：
-//   watchdog.SetTimeoutCallback(func(robotID string) {
-//       // WebSocketでクライアントに通知する
-//       ws.SendTimeoutAlert(robotID)
-//   })
+//
+//	watchdog.SetTimeoutCallback(func(robotID string) {
+//	    // WebSocketでクライアントに通知する
+//	    ws.SendTimeoutAlert(robotID)
+//	})
 //
 // 【関数を引数に渡すパターン】
 // Goでは関数は「第一級市民（first-class citizen）」です。
 // つまり、関数を変数に代入したり、引数として渡したり、
 // 戻り値として返したりできます。
 func (t *TimeoutWatchdog) SetTimeoutCallback(fn func(robotID string)) {
-t.onTimeout = fn
+	t.onTimeout = fn
 }
 
 // =============================================================================
@@ -169,10 +170,10 @@ t.onTimeout = fn
 // エサを与え忘れると（タイムアウトすると）、番犬が吠えます（ロボットを停止）。
 // これは実際の組み込みシステムで「ウォッチドッグをキック（kick）する」と言います。
 func (t *TimeoutWatchdog) RecordCommand(robotID string) {
-t.mu.Lock()
-defer t.mu.Unlock()
-// 現在時刻で最後のコマンド時刻を更新する
-t.lastCommand[robotID] = time.Now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// 現在時刻で最後のコマンド時刻を更新する
+	t.lastCommand[robotID] = time.Now()
 }
 
 // =============================================================================
@@ -183,10 +184,10 @@ t.lastCommand[robotID] = time.Now()
 // ロボットが切断された時など、監視が不要になった場合に呼び出します。
 // 監視対象から除外することで、不要なタイムアウト検出を防ぎます。
 func (t *TimeoutWatchdog) RemoveRobot(robotID string) {
-t.mu.Lock()
-defer t.mu.Unlock()
-// mapから削除して監視対象から外す
-delete(t.lastCommand, robotID)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// mapから削除して監視対象から外す
+	delete(t.lastCommand, robotID)
 }
 
 // =============================================================================
@@ -200,26 +201,26 @@ delete(t.lastCommand, robotID)
 //
 // 【context.WithCancel の仕組み】
 //
-//   親ctx ─── WithCancel() ──→ 子ctx + cancelFunc
+//	親ctx ─── WithCancel() ──→ 子ctx + cancelFunc
 //
 // 親ctxがキャンセルされると、子ctxも自動的にキャンセルされます。
 // また、cancelFunc()を呼ぶと、子ctxだけがキャンセルされます。
 // これにより、ウォッチドッグを独立して停止できます。
 func (t *TimeoutWatchdog) Start(ctx context.Context) {
-// context.WithCancel(): キャンセル可能な子コンテキストを作成する
-// watchCtx: 子コンテキスト（run()で使う）
-// cancel: キャンセル関数（Stop()で使う）
-watchCtx, cancel := context.WithCancel(ctx)
-t.cancelFunc = cancel
+	// context.WithCancel(): キャンセル可能な子コンテキストを作成する
+	// watchCtx: 子コンテキスト（run()で使う）
+	// cancel: キャンセル関数（Stop()で使う）
+	watchCtx, cancel := context.WithCancel(ctx)
+	t.cancelFunc = cancel
 
-// go t.run(watchCtx): 新しいゴルーチンでrun()を実行する
-// 「go」キーワードを付けると、関数が並行に実行されます。
-// メインの処理はブロック（停止）せず、すぐに次の行に進みます。
-go t.run(watchCtx)
+	// go t.run(watchCtx): 新しいゴルーチンでrun()を実行する
+	// 「go」キーワードを付けると、関数が並行に実行されます。
+	// メインの処理はブロック（停止）せず、すぐに次の行に進みます。
+	go t.run(watchCtx)
 
-// ウォッチドッグ開始のログを出力する
-// zap.Duration(): time.Duration型の値をログに含める
-t.logger.Info("Timeout watchdog started", zap.Duration("timeout", t.timeout))
+	// ウォッチドッグ開始のログを出力する
+	// zap.Duration(): time.Duration型の値をログに含める
+	t.logger.Info("Timeout watchdog started", zap.Duration("timeout", t.timeout))
 }
 
 // =============================================================================
@@ -230,12 +231,12 @@ t.logger.Info("Timeout watchdog started", zap.Duration("timeout", t.timeout))
 // アプリケーション終了時などに、ウォッチドッグを安全に停止します。
 // cancelFunc()を呼ぶことで、run()のゴルーチンが終了します。
 func (t *TimeoutWatchdog) Stop() {
-if t.cancelFunc != nil {
-// cancelFunc()を呼ぶと、watchCtxがキャンセルされ、
-// run()内のselect文で <-ctx.Done() が受信され、
-// run()のゴルーチンが終了します。
-t.cancelFunc()
-}
+	if t.cancelFunc != nil {
+		// cancelFunc()を呼ぶと、watchCtxがキャンセルされ、
+		// run()内のselect文で <-ctx.Done() が受信され、
+		// run()のゴルーチンが終了します。
+		t.cancelFunc()
+	}
 }
 
 // =============================================================================
@@ -255,42 +256,42 @@ t.cancelFunc()
 // run() は小文字で始まるので、パッケージ外からは呼べません。
 // Start() が外部向けのAPI、run() は内部実装です。
 func (t *TimeoutWatchdog) run(ctx context.Context) {
-// time.NewTicker(): 500ミリ秒ごとに信号を送るタイマーを作成
-ticker := time.NewTicker(500 * time.Millisecond)
+	// time.NewTicker(): 500ミリ秒ごとに信号を送るタイマーを作成
+	ticker := time.NewTicker(500 * time.Millisecond)
 
-// defer ticker.Stop(): ゴルーチン終了時にTickerをクリーンアップ
-// リソースリーク防止のために必ず必要です。
-defer ticker.Stop()
+	// defer ticker.Stop(): ゴルーチン終了時にTickerをクリーンアップ
+	// リソースリーク防止のために必ず必要です。
+	defer ticker.Stop()
 
-// 無限ループ
-for {
-// select: 複数のチャネルを同時に監視する
-select {
-case <-ctx.Done():
-// ctx.Done(): コンテキストがキャンセルされた信号を受け取るチャネル
-//
-// 【ctx.Done() とは？】
-// context がキャンセルされると、Done() チャネルが閉じられます。
-// 閉じられたチャネルからの受信は即座に完了します（ゼロ値が返る）。
-// これにより、ゴルーチンを安全に終了できます。
-//
-// 【なぜ <-ctx.Done() で停止できるのか？】
-// 通常、チャネルからの受信 <-ch はデータが来るまでブロックします。
-// しかし、チャネルが close() されると、ブロックが解除されます。
-// cancelFunc() を呼ぶと ctx の Done チャネルが close() されるので、
-// このcase文が実行されます。
-return
+	// 無限ループ
+	for {
+		// select: 複数のチャネルを同時に監視する
+		select {
+		case <-ctx.Done():
+			// ctx.Done(): コンテキストがキャンセルされた信号を受け取るチャネル
+			//
+			// 【ctx.Done() とは？】
+			// context がキャンセルされると、Done() チャネルが閉じられます。
+			// 閉じられたチャネルからの受信は即座に完了します（ゼロ値が返る）。
+			// これにより、ゴルーチンを安全に終了できます。
+			//
+			// 【なぜ <-ctx.Done() で停止できるのか？】
+			// 通常、チャネルからの受信 <-ch はデータが来るまでブロックします。
+			// しかし、チャネルが close() されると、ブロックが解除されます。
+			// cancelFunc() を呼ぶと ctx の Done チャネルが close() されるので、
+			// このcase文が実行されます。
+			return
 
-case now := <-ticker.C:
-// ticker.C: 500ミリ秒ごとに現在時刻が送信されるチャネル
-// now: 受信した時刻（time.Time型）
-//
-// 【変数代入付きの case】
-// case now := <-ticker.C は、チャネルから受信した値を
-// 変数 now に代入しています。
-t.checkTimeouts(ctx, now)
-}
-}
+		case now := <-ticker.C:
+			// ticker.C: 500ミリ秒ごとに現在時刻が送信されるチャネル
+			// now: 受信した時刻（time.Time型）
+			//
+			// 【変数代入付きの case】
+			// case now := <-ticker.C は、チャネルから受信した値を
+			// 変数 now に代入しています。
+			t.checkTimeouts(ctx, now)
+		}
+	}
 }
 
 // =============================================================================
@@ -310,91 +311,91 @@ t.checkTimeouts(ctx, now)
 // ネットワーク通信は時間がかかるため、ロック中に行うと
 // 他の処理がブロックされてしまいます。
 func (t *TimeoutWatchdog) checkTimeouts(ctx context.Context, now time.Time) {
-// --- ステップ1: 読み取りロックでタイムアウトロボットを特定する ---
-t.mu.RLock()
+	// --- ステップ1: 読み取りロックでタイムアウトロボットを特定する ---
+	t.mu.RLock()
 
-// var timedOut []string: タイムアウトしたロボットIDのスライス
-// var で宣言すると nil（空のスライス）で初期化されます。
-var timedOut []string
+	// var timedOut []string: タイムアウトしたロボットIDのスライス
+	// var で宣言すると nil（空のスライス）で初期化されます。
+	var timedOut []string
 
-for robotID, lastCmd := range t.lastCommand {
-// now.Sub(lastCmd): 現在時刻から最後のコマンド時刻を引く
-// Sub() は time.Duration を返します。
-// 例: 14:30:05 - 14:30:02 = 3秒
-//
-// t.timeout より大きければタイムアウトと判定する
-if now.Sub(lastCmd) > t.timeout {
-// append(): スライスに要素を追加する
-timedOut = append(timedOut, robotID)
-}
-}
+	for robotID, lastCmd := range t.lastCommand {
+		// now.Sub(lastCmd): 現在時刻から最後のコマンド時刻を引く
+		// Sub() は time.Duration を返します。
+		// 例: 14:30:05 - 14:30:02 = 3秒
+		//
+		// t.timeout より大きければタイムアウトと判定する
+		if now.Sub(lastCmd) > t.timeout {
+			// append(): スライスに要素を追加する
+			timedOut = append(timedOut, robotID)
+		}
+	}
 
-// 読み取りロックを解放する（ネットワーク通信の前に！）
-t.mu.RUnlock()
+	// 読み取りロックを解放する（ネットワーク通信の前に！）
+	t.mu.RUnlock()
 
-// --- ステップ2: 各タイムアウトロボットを停止する ---
+	// --- ステップ2: 各タイムアウトロボットを停止する ---
 
-// range でスライスをイテレーションする
-// スライスの range は「インデックス, 値」を返しますが、
-// ここでは「_, robotID」としてインデックスを無視しています。
-// 【アンダースコア（_）とは？】
-// Goでは使わない変数に _ を付けます。
-// Goは「宣言したけど使わない変数」があるとコンパイルエラーになるため、
-// 不要な値を明示的に破棄する必要があります。
-for _, robotID := range timedOut {
-// タイムアウトの警告ログを出力する
-t.logger.Warn("Command timeout - auto-stopping robot",
-zap.String("robot_id", robotID),
-zap.Duration("timeout", t.timeout),
-)
+	// range でスライスをイテレーションする
+	// スライスの range は「インデックス, 値」を返しますが、
+	// ここでは「_, robotID」としてインデックスを無視しています。
+	// 【アンダースコア（_）とは？】
+	// Goでは使わない変数に _ を付けます。
+	// Goは「宣言したけど使わない変数」があるとコンパイルエラーになるため、
+	// 不要な値を明示的に破棄する必要があります。
+	for _, robotID := range timedOut {
+		// タイムアウトの警告ログを出力する
+		t.logger.Warn("Command timeout - auto-stopping robot",
+			zap.String("robot_id", robotID),
+			zap.Duration("timeout", t.timeout),
+		)
 
-// --- ゼロ速度コマンドを送信してロボットを停止する ---
+		// --- ゼロ速度コマンドを送信してロボットを停止する ---
 
-// レジストリからアダプターを取得する
-if adp, ok := t.registry.GetAdapter(robotID); ok {
-// SendCommand(): ロボットにコマンドを送信する
-//
-// 【_ = adp.SendCommand(...)】
-// 戻り値のエラーを _ で無視しています。
-// タイムアウト停止は「ベストエフォート（最善の努力）」なので、
-// 失敗してもリトライはしません。
-//
-// adapter.Command: コマンドを表す構造体
-// Type: "velocity" → 速度コマンド
-// Payload: 具体的な速度値（すべてゼロ = 停止）
-_ = adp.SendCommand(ctx, adapter.Command{
-Type: "velocity",
-// map[string]any: キーがstring、値が任意の型（any = interface{}）のmap
-//
-// 【any とは？】
-// any は Go 1.18 で追加された interface{} のエイリアスです。
-// 「どんな型でも受け入れる」という意味です。
-// Python の Any、TypeScript の any に相当します。
-// ここでは float64 の値を入れていますが、
-// string や int など他の型も入れられます。
-Payload: map[string]any{
-"linear_x":  0.0, // 前後方向の速度 = 0（停止）
-"linear_y":  0.0, // 左右方向の速度 = 0（停止）
-"angular_z": 0.0, // 回転速度 = 0（停止）
-},
-})
-}
+		// レジストリからアダプターを取得する
+		if adp, ok := t.registry.GetAdapter(robotID); ok {
+			// SendCommand(): ロボットにコマンドを送信する
+			//
+			// 【_ = adp.SendCommand(...)】
+			// 戻り値のエラーを _ で無視しています。
+			// タイムアウト停止は「ベストエフォート（最善の努力）」なので、
+			// 失敗してもリトライはしません。
+			//
+			// adapter.Command: コマンドを表す構造体
+			// Type: "velocity" → 速度コマンド
+			// Payload: 具体的な速度値（すべてゼロ = 停止）
+			_ = adp.SendCommand(ctx, adapter.Command{
+				Type: "velocity",
+				// map[string]any: キーがstring、値が任意の型（any = interface{}）のmap
+				//
+				// 【any とは？】
+				// any は Go 1.18 で追加された interface{} のエイリアスです。
+				// 「どんな型でも受け入れる」という意味です。
+				// Python の Any、TypeScript の any に相当します。
+				// ここでは float64 の値を入れていますが、
+				// string や int など他の型も入れられます。
+				Payload: map[string]any{
+					"linear_x":  0.0, // 前後方向の速度 = 0（停止）
+					"linear_y":  0.0, // 左右方向の速度 = 0（停止）
+					"angular_z": 0.0, // 回転速度 = 0（停止）
+				},
+			})
+		}
 
-// --- 監視対象から除外する ---
-// 次のコマンドが来るまで、このロボットの監視を停止する
-// 書き込みロックが必要（mapからの削除）
-t.mu.Lock()
-delete(t.lastCommand, robotID)
-t.mu.Unlock()
+		// --- 監視対象から除外する ---
+		// 次のコマンドが来るまで、このロボットの監視を停止する
+		// 書き込みロックが必要（mapからの削除）
+		t.mu.Lock()
+		delete(t.lastCommand, robotID)
+		t.mu.Unlock()
 
-// --- コールバック関数を呼ぶ ---
-// onTimeout が設定されている場合のみ実行する
-// 【nil チェック】
-// 関数型の変数も nil になり得ます。
-// nil の関数を呼び出すとパニック（クラッシュ）するので、
-// 必ず nil チェックしてから呼び出します。
-if t.onTimeout != nil {
-t.onTimeout(robotID)
-}
-}
+		// --- コールバック関数を呼ぶ ---
+		// onTimeout が設定されている場合のみ実行する
+		// 【nil チェック】
+		// 関数型の変数も nil になり得ます。
+		// nil の関数を呼び出すとパニック（クラッシュ）するので、
+		// 必ず nil チェックしてから呼び出します。
+		if t.onTimeout != nil {
+			t.onTimeout(robotID)
+		}
+	}
 }

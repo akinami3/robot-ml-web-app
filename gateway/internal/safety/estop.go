@@ -23,29 +23,29 @@
 package safety
 
 import (
-// context: Goの「コンテキスト」パッケージ
-// コンテキストは、処理のキャンセル・タイムアウト・値の伝達に使います。
-// 例えば「5秒以内に緊急停止できなければタイムアウトする」などの制御ができます。
-// Goでは、外部通信を行う関数の第1引数にctx context.Contextを渡すのが慣例です。
-"context"
+	// context: Goの「コンテキスト」パッケージ
+	// コンテキストは、処理のキャンセル・タイムアウト・値の伝達に使います。
+	// 例えば「5秒以内に緊急停止できなければタイムアウトする」などの制御ができます。
+	// Goでは、外部通信を行う関数の第1引数にctx context.Contextを渡すのが慣例です。
+	"context"
 
-// sync: 「同期（synchronization）」パッケージ
-// 複数のゴルーチン（goroutine = Goの軽量スレッド）から
-// 同じデータに安全にアクセスするための仕組みを提供します。
-// ここではRWMutex（読み書きロック）を使います。
-"sync"
+	// sync: 「同期（synchronization）」パッケージ
+	// 複数のゴルーチン（goroutine = Goの軽量スレッド）から
+	// 同じデータに安全にアクセスするための仕組みを提供します。
+	// ここではRWMutex（読み書きロック）を使います。
+	"sync"
 
-// adapter: 自作のアダプターパッケージ
-// 様々な種類のロボット（ROS2、MQTT、gRPCなど）を
-// 統一的なインターフェースで操作するためのパッケージです。
-// Registry（レジストリ）を通じてロボットのアダプターを取得します。
-"github.com/robot-ai-webapp/gateway/internal/adapter"
+	// adapter: 自作のアダプターパッケージ
+	// 様々な種類のロボット（ROS2、MQTT、gRPCなど）を
+	// 統一的なインターフェースで操作するためのパッケージです。
+	// Registry（レジストリ）を通じてロボットのアダプターを取得します。
+	"github.com/robot-ai-webapp/gateway/internal/adapter"
 
-// zap: 高性能なログ出力ライブラリ（Uber社が開発）
-// fmt.Printlnの代わりに使う、本番環境向けのロガーです。
-// 構造化ログ（structured logging）をサポートし、
-// ログレベル（Debug, Info, Warn, Error）を使い分けられます。
-"go.uber.org/zap"
+	// zap: 高性能なログ出力ライブラリ（Uber社が開発）
+	// fmt.Printlnの代わりに使う、本番環境向けのロガーです。
+	// 構造化ログ（structured logging）をサポートし、
+	// ログレベル（Debug, Info, Warn, Error）を使い分けられます。
+	"go.uber.org/zap"
 )
 
 // =============================================================================
@@ -61,57 +61,57 @@ import (
 // すべてのロボットの緊急停止状態を一元管理します。
 // どのロボットが停止中か、どのアダプターを使うか、ログをどう出すかを保持します。
 type EStopManager struct {
-// mu: ミューテックス（Mutex = Mutual Exclusion = 相互排除）
-//
-// 【sync.RWMutex とは？】
-// 複数のゴルーチンが同時にデータにアクセスする時の「交通整理役」です。
-//
-// RWMutex には2種類のロックがあります：
-// - RLock()  / RUnlock()  : 読み取りロック（Read Lock）
-//   → 複数のゴルーチンが同時に読み取れる（読み取り同士はブロックしない）
-// - Lock()   / Unlock()   : 書き込みロック（Write Lock）
-//   → 1つのゴルーチンだけが書き込める（他の全てをブロックする）
-//
-// 【なぜ必要？】
-// Webアプリでは、複数のユーザーが同時に緊急停止ボタンを押す可能性があります。
-// ロックなしでmapを同時に読み書きすると、データが壊れます（data race）。
-//
-// 【RWMutex vs Mutex の使い分け】
-// - 読み取りが多く、書き込みが少ない場合 → RWMutex（こちらを使用）
-// - 読み書きが同じくらいの場合 → Mutex
-// 緊急停止の確認（読み取り）は頻繁に行われますが、
-// 発動（書き込み）はまれなので、RWMutex が適しています。
-mu sync.RWMutex
+	// mu: ミューテックス（Mutex = Mutual Exclusion = 相互排除）
+	//
+	// 【sync.RWMutex とは？】
+	// 複数のゴルーチンが同時にデータにアクセスする時の「交通整理役」です。
+	//
+	// RWMutex には2種類のロックがあります：
+	//   - RLock()  / RUnlock()  : 読み取りロック（Read Lock）
+	//     → 複数のゴルーチンが同時に読み取れる（読み取り同士はブロックしない）
+	//   - Lock()   / Unlock()   : 書き込みロック（Write Lock）
+	//     → 1つのゴルーチンだけが書き込める（他の全てをブロックする）
+	//
+	// 【なぜ必要？】
+	// Webアプリでは、複数のユーザーが同時に緊急停止ボタンを押す可能性があります。
+	// ロックなしでmapを同時に読み書きすると、データが壊れます（data race）。
+	//
+	// 【RWMutex vs Mutex の使い分け】
+	// - 読み取りが多く、書き込みが少ない場合 → RWMutex（こちらを使用）
+	// - 読み書きが同じくらいの場合 → Mutex
+	// 緊急停止の確認（読み取り）は頻繁に行われますが、
+	// 発動（書き込み）はまれなので、RWMutex が適しています。
+	mu sync.RWMutex
 
-// active: 緊急停止が有効なロボットを管理するmap
-//
-// 【map とは？】
-// map[キーの型]値の型 という形式で、キーと値のペアを格納します。
-// Pythonの辞書（dict）、JavaScriptのオブジェクトに似ています。
-//
-// ここでは map[string]bool で：
-// - キー: ロボットID（例: "robot_001"）
-// - 値: 緊急停止が有効かどうか（true = 停止中）
-//
-// 例: {"robot_001": true, "robot_003": true}
-// → robot_001 と robot_003 が緊急停止中
-active map[string]bool // robot_id -> estop active
+	// active: 緊急停止が有効なロボットを管理するmap
+	//
+	// 【map とは？】
+	// map[キーの型]値の型 という形式で、キーと値のペアを格納します。
+	// Pythonの辞書（dict）、JavaScriptのオブジェクトに似ています。
+	//
+	// ここでは map[string]bool で：
+	// - キー: ロボットID（例: "robot_001"）
+	// - 値: 緊急停止が有効かどうか（true = 停止中）
+	//
+	// 例: {"robot_001": true, "robot_003": true}
+	// → robot_001 と robot_003 が緊急停止中
+	active map[string]bool // robot_id -> estop active
 
-// registry: アダプターレジストリ
-// 接続中のすべてのロボットアダプターを管理するレジストリへの参照です。
-// ロボットに実際に停止命令を送るために必要です。
-//
-// 【ポインタ（*）とは？】
-// *adapter.Registry はポインタ型です。
-// ポインタは「データが保存されているメモリのアドレス（住所）」です。
-// Registry のコピーではなく、元のデータを直接参照します。
-// これにより、メモリの無駄遣いを防ぎ、データの一貫性を保ちます。
-registry *adapter.Registry
+	// registry: アダプターレジストリ
+	// 接続中のすべてのロボットアダプターを管理するレジストリへの参照です。
+	// ロボットに実際に停止命令を送るために必要です。
+	//
+	// 【ポインタ（*）とは？】
+	// *adapter.Registry はポインタ型です。
+	// ポインタは「データが保存されているメモリのアドレス（住所）」です。
+	// Registry のコピーではなく、元のデータを直接参照します。
+	// これにより、メモリの無駄遣いを防ぎ、データの一貫性を保ちます。
+	registry *adapter.Registry
 
-// logger: ログ出力用のロガー
-// 緊急停止の発動・解除などの重要なイベントをログに記録します。
-// 安全機能なので、すべての操作を記録することが重要です。
-logger *zap.Logger
+	// logger: ログ出力用のロガー
+	// 緊急停止の発動・解除などの重要なイベントをログに記録します。
+	// 安全機能なので、すべての操作を記録することが重要です。
+	logger *zap.Logger
 }
 
 // =============================================================================
@@ -128,18 +128,18 @@ logger *zap.Logger
 // - logger: ログ出力用のロガー
 //
 // 【戻り値】
-// - *EStopManager: 初期化されたEStopManagerへのポインタ
-//   ポインタを返すのは、呼び出し元と同じデータを共有するためです。
+//   - *EStopManager: 初期化されたEStopManagerへのポインタ
+//     ポインタを返すのは、呼び出し元と同じデータを共有するためです。
 func NewEStopManager(registry *adapter.Registry, logger *zap.Logger) *EStopManager {
-return &EStopManager{
-// make(map[string]bool): mapを初期化する組み込み関数
-// Goでは、mapは宣言しただけでは nil（空・未初期化）です。
-// nilのmapに値を入れようとするとパニック（実行時エラー）になります。
-// 必ず make() で初期化してから使います。
-active:   make(map[string]bool),
-registry: registry,
-logger:   logger,
-}
+	return &EStopManager{
+		// make(map[string]bool): mapを初期化する組み込み関数
+		// Goでは、mapは宣言しただけでは nil（空・未初期化）です。
+		// nilのmapに値を入れようとするとパニック（実行時エラー）になります。
+		// 必ず make() で初期化してから使います。
+		active:   make(map[string]bool),
+		registry: registry,
+		logger:   logger,
+	}
 }
 
 // =============================================================================
@@ -164,66 +164,66 @@ logger:   logger,
 // - reason: 停止の理由（例: "障害物検出", "手動停止"）
 //
 // 【戻り値】
-// - error: エラーがあればそのエラー、なければ nil
-//   Goではエラーを戻り値で返すのが基本です（例外は使いません）。
+//   - error: エラーがあればそのエラー、なければ nil
+//     Goではエラーを戻り値で返すのが基本です（例外は使いません）。
 func (e *EStopManager) Activate(ctx context.Context, robotID, userID, reason string) error {
-// --- ステップ1: 緊急停止状態をmapに記録する ---
+	// --- ステップ1: 緊急停止状態をmapに記録する ---
 
-// Lock(): 書き込みロックを取得する
-// 他のゴルーチンは、読み取りも書き込みもできなくなります。
-// mapへの書き込みは排他的に行う必要があるため、Lock()を使います。
-e.mu.Lock()
+	// Lock(): 書き込みロックを取得する
+	// 他のゴルーチンは、読み取りも書き込みもできなくなります。
+	// mapへの書き込みは排他的に行う必要があるため、Lock()を使います。
+	e.mu.Lock()
 
-// mapに緊急停止状態を記録する
-// 例: e.active["robot_001"] = true
-e.active[robotID] = true
+	// mapに緊急停止状態を記録する
+	// 例: e.active["robot_001"] = true
+	e.active[robotID] = true
 
-// Unlock(): 書き込みロックを解放する
-// ロックを持ったまま長い処理をすると、他のゴルーチンが待たされるので、
-// できるだけ早くロックを解放します。
-//
-// 【注意】ここでは defer を使わずに手動で Unlock() しています。
-// これは、この後の処理（ログ出力やネットワーク通信）を
-// ロック外で行うためです。ロックの範囲は最小限にするのが良い設計です。
-e.mu.Unlock()
+	// Unlock(): 書き込みロックを解放する
+	// ロックを持ったまま長い処理をすると、他のゴルーチンが待たされるので、
+	// できるだけ早くロックを解放します。
+	//
+	// 【注意】ここでは defer を使わずに手動で Unlock() しています。
+	// これは、この後の処理（ログ出力やネットワーク通信）を
+	// ロック外で行うためです。ロックの範囲は最小限にするのが良い設計です。
+	e.mu.Unlock()
 
-// --- ステップ2: 緊急停止のログを出力する ---
+	// --- ステップ2: 緊急停止のログを出力する ---
 
-// logger.Warn(): 警告レベルのログを出力する
-// 【ログレベルの使い分け】
-// - Debug: デバッグ用の詳細情報（本番では非表示にすることが多い）
-// - Info: 通常の情報（接続成功、ロック取得など）
-// - Warn: 注意が必要な事象（緊急停止の発動は重要！）
-// - Error: エラー（停止に失敗した場合など）
-//
-// zap.String("key", "value"): 構造化ログのフィールド
-// ログにキーと値のペアを追加します。
-// JSONフォーマットで出力でき、ログの検索・分析が容易になります。
-e.logger.Warn("E-STOP ACTIVATED",
-zap.String("robot_id", robotID),
-zap.String("user_id", userID),
-zap.String("reason", reason),
-)
+	// logger.Warn(): 警告レベルのログを出力する
+	// 【ログレベルの使い分け】
+	// - Debug: デバッグ用の詳細情報（本番では非表示にすることが多い）
+	// - Info: 通常の情報（接続成功、ロック取得など）
+	// - Warn: 注意が必要な事象（緊急停止の発動は重要！）
+	// - Error: エラー（停止に失敗した場合など）
+	//
+	// zap.String("key", "value"): 構造化ログのフィールド
+	// ログにキーと値のペアを追加します。
+	// JSONフォーマットで出力でき、ログの検索・分析が容易になります。
+	e.logger.Warn("E-STOP ACTIVATED",
+		zap.String("robot_id", robotID),
+		zap.String("user_id", userID),
+		zap.String("reason", reason),
+	)
 
-// --- ステップ3: 実際にロボットを緊急停止させる ---
+	// --- ステップ3: 実際にロボットを緊急停止させる ---
 
-// registry.GetAdapter(): レジストリからロボットのアダプターを取得する
-//
-// 【多値返却（Multiple Return Values）】
-// Goの関数は複数の値を返せます。ここでは：
-// - adp: アダプター本体
-// - ok: 取得できたかどうか（bool型）
-// この「値, ok」のパターンは「カンマOKイディオム」と呼ばれ、
-// Goで非常に頻繁に使われます。
-if adp, ok := e.registry.GetAdapter(robotID); ok {
-// アダプターが見つかった場合、緊急停止コマンドを送信する
-// EmergencyStop(): アダプターインターフェースで定義された緊急停止メソッド
-return adp.EmergencyStop(ctx)
-}
+	// registry.GetAdapter(): レジストリからロボットのアダプターを取得する
+	//
+	// 【多値返却（Multiple Return Values）】
+	// Goの関数は複数の値を返せます。ここでは：
+	// - adp: アダプター本体
+	// - ok: 取得できたかどうか（bool型）
+	// この「値, ok」のパターンは「カンマOKイディオム」と呼ばれ、
+	// Goで非常に頻繁に使われます。
+	if adp, ok := e.registry.GetAdapter(robotID); ok {
+		// アダプターが見つかった場合、緊急停止コマンドを送信する
+		// EmergencyStop(): アダプターインターフェースで定義された緊急停止メソッド
+		return adp.EmergencyStop(ctx)
+	}
 
-// アダプターが見つからない場合（ロボットが接続されていない場合）
-// エラーではなく nil を返す（状態の記録だけは完了しているため）
-return nil
+	// アダプターが見つからない場合（ロボットが接続されていない場合）
+	// エラーではなく nil を返す（状態の記録だけは完了しているため）
+	return nil
 }
 
 // =============================================================================
@@ -244,61 +244,61 @@ return nil
 // Pythonのリスト（list）に似ています。
 // append() で要素を追加できます。
 func (e *EStopManager) ActivateAll(ctx context.Context, userID, reason string) (int, []string) {
-// すべてのアクティブなアダプターを取得する
-// 戻り値は map[string]RobotAdapter（ロボットID → アダプター のmap）
-adapters := e.registry.GetAllActive()
+	// すべてのアクティブなアダプターを取得する
+	// 戻り値は map[string]RobotAdapter（ロボットID → アダプター のmap）
+	adapters := e.registry.GetAllActive()
 
-// 停止成功カウンターと失敗リストを初期化
-stopped := 0
-var failed []string
-// 【var と := の違い】
-// var failed []string  → 変数を宣言する（初期値は nil）
-// failed := []string{} → 変数を宣言と同時に空のスライスで初期化する
-// ここでは var を使っているので、failed は nil（要素なし）で始まります。
-// nil スライスでも append() は正常に動作します。
+	// 停止成功カウンターと失敗リストを初期化
+	stopped := 0
+	var failed []string
+	// 【var と := の違い】
+	// var failed []string  → 変数を宣言する（初期値は nil）
+	// failed := []string{} → 変数を宣言と同時に空のスライスで初期化する
+	// ここでは var を使っているので、failed は nil（要素なし）で始まります。
+	// nil スライスでも append() は正常に動作します。
 
-// --- すべてのロボットの緊急停止状態をmapに記録する ---
-e.mu.Lock()
-// range: mapやスライスをイテレーション（繰り返し）するキーワード
-// map の range は「キー, 値」の順で返します。
-// ここでは robotID（キー）だけが必要なので、値は使いません。
-for robotID := range adapters {
-e.active[robotID] = true
-}
-e.mu.Unlock()
+	// --- すべてのロボットの緊急停止状態をmapに記録する ---
+	e.mu.Lock()
+	// range: mapやスライスをイテレーション（繰り返し）するキーワード
+	// map の range は「キー, 値」の順で返します。
+	// ここでは robotID（キー）だけが必要なので、値は使いません。
+	for robotID := range adapters {
+		e.active[robotID] = true
+	}
+	e.mu.Unlock()
 
-// --- 各ロボットに緊急停止コマンドを送信する ---
-// range で map をイテレーションし、各アダプターに停止命令を送ります
-for robotID, adp := range adapters {
-if err := adp.EmergencyStop(ctx); err != nil {
-// 停止に失敗した場合
+	// --- 各ロボットに緊急停止コマンドを送信する ---
+	// range で map をイテレーションし、各アダプターに停止命令を送ります
+	for robotID, adp := range adapters {
+		if err := adp.EmergencyStop(ctx); err != nil {
+			// 停止に失敗した場合
 
-// logger.Error(): エラーレベルのログを出力する
-// zap.Error(err): エラーオブジェクトをログに含める
-e.logger.Error("Failed to E-Stop robot",
-zap.String("robot_id", robotID),
-zap.Error(err),
-)
-// 失敗リストにロボットIDを追加する
-// append(): スライスに要素を追加するGoの組み込み関数
-failed = append(failed, robotID)
-} else {
-// 停止に成功した場合、カウンターを増やす
-stopped++
-}
-}
+			// logger.Error(): エラーレベルのログを出力する
+			// zap.Error(err): エラーオブジェクトをログに含める
+			e.logger.Error("Failed to E-Stop robot",
+				zap.String("robot_id", robotID),
+				zap.Error(err),
+			)
+			// 失敗リストにロボットIDを追加する
+			// append(): スライスに要素を追加するGoの組み込み関数
+			failed = append(failed, robotID)
+		} else {
+			// 停止に成功した場合、カウンターを増やす
+			stopped++
+		}
+	}
 
-// 全体緊急停止の結果をログに出力する
-// zap.Int(): int型の値をログに含める
-e.logger.Warn("E-STOP ALL ACTIVATED",
-zap.String("user_id", userID),
-zap.String("reason", reason),
-zap.Int("stopped", stopped),
-zap.Int("failed", len(failed)),
-)
+	// 全体緊急停止の結果をログに出力する
+	// zap.Int(): int型の値をログに含める
+	e.logger.Warn("E-STOP ALL ACTIVATED",
+		zap.String("user_id", userID),
+		zap.String("reason", reason),
+		zap.Int("stopped", stopped),
+		zap.Int("failed", len(failed)),
+	)
 
-// 停止成功数と失敗ロボットIDのリストを返す
-return stopped, failed
+	// 停止成功数と失敗ロボットIDのリストを返す
+	return stopped, failed
 }
 
 // =============================================================================
@@ -313,23 +313,23 @@ return stopped, failed
 // 実際のロボットシステムでは、緊急停止の解除は慎重に行う必要があります。
 // 通常、管理者権限が必要です。
 func (e *EStopManager) Release(robotID, userID string) {
-// 書き込みロックを取得（mapから要素を削除するため）
-e.mu.Lock()
+	// 書き込みロックを取得（mapから要素を削除するため）
+	e.mu.Lock()
 
-// delete(): mapから要素を削除するGoの組み込み関数
-// delete(map, key) の形式で使います。
-// キーが存在しなくてもパニックにはなりません（安全に無視されます）。
-delete(e.active, robotID)
+	// delete(): mapから要素を削除するGoの組み込み関数
+	// delete(map, key) の形式で使います。
+	// キーが存在しなくてもパニックにはなりません（安全に無視されます）。
+	delete(e.active, robotID)
 
-// ロックを解放する
-e.mu.Unlock()
+	// ロックを解放する
+	e.mu.Unlock()
 
-// 緊急停止解除のログを出力する
-// Info レベル: 通常の操作情報として記録
-e.logger.Info("E-Stop released",
-zap.String("robot_id", robotID),
-zap.String("user_id", userID),
-)
+	// 緊急停止解除のログを出力する
+	// Info レベル: 通常の操作情報として記録
+	e.logger.Info("E-Stop released",
+		zap.String("robot_id", robotID),
+		zap.String("user_id", userID),
+	)
 }
 
 // =============================================================================
@@ -345,29 +345,29 @@ zap.String("user_id", userID),
 // RLock() を使うことで、他の読み取り操作と同時に実行できます。
 // IsActive() は頻繁に呼ばれるため、RLock() を使うことでパフォーマンスが向上します。
 func (e *EStopManager) IsActive(robotID string) bool {
-// RLock(): 読み取りロックを取得する
-// 複数のゴルーチンが同時に RLock() を取得できます。
-// ただし、Lock()（書き込みロック）が取得されている間は待たされます。
-e.mu.RLock()
+	// RLock(): 読み取りロックを取得する
+	// 複数のゴルーチンが同時に RLock() を取得できます。
+	// ただし、Lock()（書き込みロック）が取得されている間は待たされます。
+	e.mu.RLock()
 
-// defer: 関数が終了（returnする）時に自動的に実行される
-//
-// 【defer とは？】
-// 「この関数が終わる時に、この処理を必ず実行してね」という予約です。
-// ロックの解放忘れ（デッドロック）を防ぐために非常に重要です。
-//
-// 例えば、return文の前にUnlockを書き忘れると、ロックが永遠に解放されず、
-// プログラム全体が止まります（デッドロック）。
-// deferを使えば、どのreturn文を通っても必ずUnlockされます。
-defer e.mu.RUnlock()
+	// defer: 関数が終了（returnする）時に自動的に実行される
+	//
+	// 【defer とは？】
+	// 「この関数が終わる時に、この処理を必ず実行してね」という予約です。
+	// ロックの解放忘れ（デッドロック）を防ぐために非常に重要です。
+	//
+	// 例えば、return文の前にUnlockを書き忘れると、ロックが永遠に解放されず、
+	// プログラム全体が止まります（デッドロック）。
+	// deferを使えば、どのreturn文を通っても必ずUnlockされます。
+	defer e.mu.RUnlock()
 
-// map から値を取得する
-// robotIDが存在しない場合、bool型のゼロ値（false）が返されます。
-// 【Goのゼロ値】
-// Goでは、mapに存在しないキーを読み取ると、値の型のゼロ値が返されます。
-// - bool のゼロ値: false
-// - int のゼロ値: 0
-// - string のゼロ値: ""
-// - ポインタのゼロ値: nil
-return e.active[robotID]
+	// map から値を取得する
+	// robotIDが存在しない場合、bool型のゼロ値（false）が返されます。
+	// 【Goのゼロ値】
+	// Goでは、mapに存在しないキーを読み取ると、値の型のゼロ値が返されます。
+	// - bool のゼロ値: false
+	// - int のゼロ値: 0
+	// - string のゼロ値: ""
+	// - ポインタのゼロ値: nil
+	return e.active[robotID]
 }

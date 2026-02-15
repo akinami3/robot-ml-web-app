@@ -53,7 +53,8 @@ import (
 // Go のテスト関数名は「Test」で始まり、その後に大文字が続く必要がある。
 // 一般的な命名パターン: Test<対象>_<条件やシナリオ>
 // 例: TestVelocityLimiter_NoClamp
-//   → VelocityLimiter を対象に、NoClamp（制限なし）のケースをテスト
+//
+//	→ VelocityLimiter を対象に、NoClamp（制限なし）のケースをテスト
 //
 // 【引数 t *testing.T について】
 // t はテストの実行状態を管理するオブジェクト。

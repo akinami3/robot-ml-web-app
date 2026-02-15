@@ -22,6 +22,7 @@
 //   - LiDAR: 10Hz（1秒間に10回）で距離データを生成
 //   - IMU: 50Hz（1秒間に50回）で姿勢データを生成
 //   - バッテリー: 0.2Hz（5秒に1回）でバッテリー状態を更新
+//
 // =============================================================================
 package mock
 
@@ -482,9 +483,9 @@ func (m *MockAdapter) generateOdometry(ctx context.Context) {
 
 			// 送信するセンサーデータを構造体リテラルで作成
 			data := adapter.SensorData{
-				Topic:     "odom",                // トピック名（購読者がフィルタに使う）
-				DataType:  "odometry",            // データの種類
-				FrameID:   "odom",                // 座標系の基準フレーム
+				Topic:     "odom",                 // トピック名（購読者がフィルタに使う）
+				DataType:  "odometry",             // データの種類
+				FrameID:   "odom",                 // 座標系の基準フレーム
 				Timestamp: time.Now().UnixMilli(), // 現在時刻のミリ秒タイムスタンプ
 				Data: map[string]any{
 					"position_x":    m.posX,     // X座標（m）
@@ -567,9 +568,9 @@ func (m *MockAdapter) generateLiDAR(ctx context.Context) {
 
 			// LiDARデータの構造体を作成
 			data := adapter.SensorData{
-				Topic:     "scan",                 // "scan" はLiDARの一般的なトピック名
+				Topic:     "scan", // "scan" はLiDARの一般的なトピック名
 				DataType:  "lidar",
-				FrameID:   "lidar_link",           // LiDARセンサーの座標フレーム
+				FrameID:   "lidar_link", // LiDARセンサーの座標フレーム
 				Timestamp: time.Now().UnixMilli(),
 				Data: map[string]any{
 					"angle_min":       0.0,             // スキャン開始角度（0ラジアン）

@@ -29,19 +29,19 @@
 package safety
 
 import (
-// math: 数学関数パッケージ
-// Sqrt(): 平方根（ルート）を計算する → ベクトルの大きさの計算に使用
-// Abs(): 絶対値を計算する → 符号を無視した比較に使用
-//
-// 【なぜ math パッケージが必要？】
-// 直進速度はX方向とY方向の2つの成分があります。
-// 合計の速さは「ベクトルの大きさ」として計算する必要があり、
-// そのためにピタゴラスの定理（√(x² + y²)）を使います。
-"math"
+	// math: 数学関数パッケージ
+	// Sqrt(): 平方根（ルート）を計算する → ベクトルの大きさの計算に使用
+	// Abs(): 絶対値を計算する → 符号を無視した比較に使用
+	//
+	// 【なぜ math パッケージが必要？】
+	// 直進速度はX方向とY方向の2つの成分があります。
+	// 合計の速さは「ベクトルの大きさ」として計算する必要があり、
+	// そのためにピタゴラスの定理（√(x² + y²)）を使います。
+	"math"
 
-// zap: 高性能ロガー
-// 速度が制限された時にログを出力します。
-"go.uber.org/zap"
+	// zap: 高性能ロガー
+	// 速度が制限された時にログを出力します。
+	"go.uber.org/zap"
 )
 
 // =============================================================================
@@ -54,16 +54,16 @@ import (
 // なぜなら、設定値（maxLinearVel, maxAngularVel）は初期化後に変更されないからです。
 // 読み取り専用のデータはロックなしで安全にアクセスできます。
 type VelocityLimiter struct {
-// maxLinearVel: 最大直進速度（m/s = メートル毎秒）
-// 例: 1.0 → 1秒間に最大1メートル移動
-maxLinearVel float64
+	// maxLinearVel: 最大直進速度（m/s = メートル毎秒）
+	// 例: 1.0 → 1秒間に最大1メートル移動
+	maxLinearVel float64
 
-// maxAngularVel: 最大回転速度（rad/s = ラジアン毎秒）
-// 例: 1.57 → 約1秒で90度回転（π/2 ≈ 1.57）
-maxAngularVel float64
+	// maxAngularVel: 最大回転速度（rad/s = ラジアン毎秒）
+	// 例: 1.57 → 約1秒で90度回転（π/2 ≈ 1.57）
+	maxAngularVel float64
 
-// logger: ログ出力用のロガー
-logger *zap.Logger
+	// logger: ログ出力用のロガー
+	logger *zap.Logger
 }
 
 // =============================================================================
@@ -78,15 +78,15 @@ logger *zap.Logger
 // 【戻り値】
 // - *VelocityLimiter: 初期化された速度制限器へのポインタ
 func NewVelocityLimiter(maxLinear, maxAngular float64, logger *zap.Logger) *VelocityLimiter {
-// 【複数の引数をまとめて宣言する】
-// maxLinear, maxAngular float64 は、
-// maxLinear float64, maxAngular float64 の省略形です。
-// 同じ型の引数が連続する場合、型名を1回だけ書けます。
-return &VelocityLimiter{
-maxLinearVel:  maxLinear,
-maxAngularVel: maxAngular,
-logger:        logger,
-}
+	// 【複数の引数をまとめて宣言する】
+	// maxLinear, maxAngular float64 は、
+	// maxLinear float64, maxAngular float64 の省略形です。
+	// 同じ型の引数が連続する場合、型名を1回だけ書けます。
+	return &VelocityLimiter{
+		maxLinearVel:  maxLinear,
+		maxAngularVel: maxAngular,
+		logger:        logger,
+	}
 }
 
 // =============================================================================
@@ -99,21 +99,21 @@ logger:        logger,
 // 【座標系の説明】
 // ロボットの座標系は通常「右手座標系」を使います：
 //
-//        前（+X）
-//         ↑
-//  左（+Y）←  → 右（−Y）
-//         ↓
-//        後（−X）
+//	      前（+X）
+//	       ↑
+//	左（+Y）←  → 右（−Y）
+//	       ↓
+//	      後（−X）
 //
-//  反時計回り（+Z） ↺    ↻ 時計回り（−Z）
+//	反時計回り（+Z） ↺    ↻ 時計回り（−Z）
 //
 // - LinearX: X方向（前後）の速度。正=前進、負=後退
 // - LinearY: Y方向（左右）の速度。正=左、負=右（ホロノミックロボットのみ）
 // - AngularZ: Z軸周り（上から見て）の回転速度。正=反時計回り、負=時計回り
 type VelocityInput struct {
-LinearX  float64
-LinearY  float64
-AngularZ float64
+	LinearX  float64
+	LinearY  float64
+	AngularZ float64
 }
 
 // =============================================================================
@@ -125,10 +125,10 @@ AngularZ float64
 // Clamped フィールドで「制限されたかどうか」がわかるので、
 // 呼び出し元でログを出したり、ユーザーに警告を表示したりできます。
 type LimitResult struct {
-LinearX  float64 // 制限後のX方向速度
-LinearY  float64 // 制限後のY方向速度
-AngularZ float64 // 制限後の回転速度
-Clamped  bool    // 制限が行われたか（true = 制限された）
+	LinearX  float64 // 制限後のX方向速度
+	LinearY  float64 // 制限後のY方向速度
+	AngularZ float64 // 制限後の回転速度
+	Clamped  bool    // 制限が行われたか（true = 制限された）
 }
 
 // =============================================================================
@@ -146,103 +146,103 @@ Clamped  bool    // 制限が行われたか（true = 制限された）
 // - input: ユーザーからの速度入力
 //
 // 【戻り値】
-// - LimitResult: 制限後の速度値と制限フラグ
-//   （ポインタではなく値を返している → 小さい構造体なのでコピーでOK）
+//   - LimitResult: 制限後の速度値と制限フラグ
+//     （ポインタではなく値を返している → 小さい構造体なのでコピーでOK）
 func (v *VelocityLimiter) Limit(input VelocityInput) LimitResult {
-// 入力値をそのまま結果にコピーする
-// 制限が不要な場合は、この値がそのまま返されます。
-result := LimitResult{
-LinearX:  input.LinearX,
-LinearY:  input.LinearY,
-AngularZ: input.AngularZ,
-}
+	// 入力値をそのまま結果にコピーする
+	// 制限が不要な場合は、この値がそのまま返されます。
+	result := LimitResult{
+		LinearX:  input.LinearX,
+		LinearY:  input.LinearY,
+		AngularZ: input.AngularZ,
+	}
 
-// =========================================================================
-// 直進速度の制限（ベクトルスケーリング）
-// =========================================================================
-//
-// 【ベクトルの大きさの計算】
-// 直進速度はX方向とY方向の成分があります。
-// 合計の速さ（スカラー値）はピタゴラスの定理で計算します：
-//
-//   速さ = √(X² + Y²)
-//
-// 例: X=3, Y=4 の場合 → √(9 + 16) = √25 = 5
-//
-// 【math.Sqrt() とは？】
-// 平方根（ルート/√）を計算する関数です。
-// Sqrt は "Square Root" の略です。
-//
-// 【なぜ個別にXとYを制限しないのか？】
-// 例えば、maxLinear=1.0 で X=0.8, Y=0.8 の場合：
-// - 個別制限: X=0.8, Y=0.8 → 合計速さ=1.13（最大値を超える！）
-// - ベクトル制限: 合計速さ=1.13 → スケールダウン → X=0.71, Y=0.71（正しい）
-//
-// ベクトル全体をスケールすることで、移動方向を変えずに速さだけを制限できます。
-linearMag := math.Sqrt(input.LinearX*input.LinearX + input.LinearY*input.LinearY)
+	// =========================================================================
+	// 直進速度の制限（ベクトルスケーリング）
+	// =========================================================================
+	//
+	// 【ベクトルの大きさの計算】
+	// 直進速度はX方向とY方向の成分があります。
+	// 合計の速さ（スカラー値）はピタゴラスの定理で計算します：
+	//
+	//	速さ = √(X² + Y²)
+	//
+	// 例: X=3, Y=4 の場合 → √(9 + 16) = √25 = 5
+	//
+	// 【math.Sqrt() とは？】
+	// 平方根（ルート/√）を計算する関数です。
+	// Sqrt は "Square Root" の略です。
+	//
+	// 【なぜ個別にXとYを制限しないのか？】
+	// 例えば、maxLinear=1.0 で X=0.8, Y=0.8 の場合：
+	// - 個別制限: X=0.8, Y=0.8 → 合計速さ=1.13（最大値を超える！）
+	// - ベクトル制限: 合計速さ=1.13 → スケールダウン → X=0.71, Y=0.71（正しい）
+	//
+	// ベクトル全体をスケールすることで、移動方向を変えずに速さだけを制限できます。
+	linearMag := math.Sqrt(input.LinearX*input.LinearX + input.LinearY*input.LinearY)
 
-if linearMag > v.maxLinearVel {
-// 【スケールファクター（scale factor）の計算】
-// scale = 最大速度 / 実際の速度
-// 例: maxLinear=1.0, linearMag=2.0 → scale=0.5
-// これをXとYの両方に掛けることで、方向は同じまま速さを半減します。
-//
-// 【なぜ方向を維持するのか？】
-// ユーザーが「右前方に進め」と指示した場合、
-// 速さだけを制限して方向は変えないのが正しい動作です。
-// XとYに同じスケールを掛けることで、ベクトルの方向が保たれます。
-scale := v.maxLinearVel / linearMag
-result.LinearX = input.LinearX * scale
-result.LinearY = input.LinearY * scale
-result.Clamped = true
-}
+	if linearMag > v.maxLinearVel {
+		// 【スケールファクター（scale factor）の計算】
+		// scale = 最大速度 / 実際の速度
+		// 例: maxLinear=1.0, linearMag=2.0 → scale=0.5
+		// これをXとYの両方に掛けることで、方向は同じまま速さを半減します。
+		//
+		// 【なぜ方向を維持するのか？】
+		// ユーザーが「右前方に進め」と指示した場合、
+		// 速さだけを制限して方向は変えないのが正しい動作です。
+		// XとYに同じスケールを掛けることで、ベクトルの方向が保たれます。
+		scale := v.maxLinearVel / linearMag
+		result.LinearX = input.LinearX * scale
+		result.LinearY = input.LinearY * scale
+		result.Clamped = true
+	}
 
-// =========================================================================
-// 回転速度の制限（絶対値クランプ）
-// =========================================================================
-//
-// 【math.Abs() とは？】
-// 絶対値を計算する関数です。負の数を正の数に変換します。
-// Abs は "Absolute" の略です。
-// 例: Abs(-3.14) = 3.14, Abs(2.0) = 2.0
-//
-// 回転速度は正（反時計回り）と負（時計回り）の両方があるため、
-// 絶対値で比較して、方向（符号）を維持したまま制限します。
-if math.Abs(input.AngularZ) > v.maxAngularVel {
-// 回転方向（符号）に応じて最大値を設定する
-if input.AngularZ > 0 {
-// 正の値 → 正の最大値に制限
-result.AngularZ = v.maxAngularVel
-} else {
-// 負の値 → 負の最大値に制限
-result.AngularZ = -v.maxAngularVel
-}
-result.Clamped = true
-}
+	// =========================================================================
+	// 回転速度の制限（絶対値クランプ）
+	// =========================================================================
+	//
+	// 【math.Abs() とは？】
+	// 絶対値を計算する関数です。負の数を正の数に変換します。
+	// Abs は "Absolute" の略です。
+	// 例: Abs(-3.14) = 3.14, Abs(2.0) = 2.0
+	//
+	// 回転速度は正（反時計回り）と負（時計回り）の両方があるため、
+	// 絶対値で比較して、方向（符号）を維持したまま制限します。
+	if math.Abs(input.AngularZ) > v.maxAngularVel {
+		// 回転方向（符号）に応じて最大値を設定する
+		if input.AngularZ > 0 {
+			// 正の値 → 正の最大値に制限
+			result.AngularZ = v.maxAngularVel
+		} else {
+			// 負の値 → 負の最大値に制限
+			result.AngularZ = -v.maxAngularVel
+		}
+		result.Clamped = true
+	}
 
-// =========================================================================
-// 制限が行われた場合、デバッグログを出力する
-// =========================================================================
-//
-// 【なぜ Debug レベル？】
-// 速度制限は頻繁に発生する可能性があるため、
-// Warn や Info ではなく Debug レベルで出力します。
-// 本番環境ではDebugログを無効にすることで、ログの量を削減できます。
-//
-// 【ログのフィールド名の慣例】
-// req_lx: requested linear_x（要求された直進X速度）
-// out_lx: output linear_x（出力された直進X速度）
-// 短い名前を使うことで、ログの可読性を高めています。
-if result.Clamped {
-v.logger.Debug("Velocity clamped",
-zap.Float64("req_lx", input.LinearX),
-zap.Float64("req_ly", input.LinearY),
-zap.Float64("req_az", input.AngularZ),
-zap.Float64("out_lx", result.LinearX),
-zap.Float64("out_ly", result.LinearY),
-zap.Float64("out_az", result.AngularZ),
-)
-}
+	// =========================================================================
+	// 制限が行われた場合、デバッグログを出力する
+	// =========================================================================
+	//
+	// 【なぜ Debug レベル？】
+	// 速度制限は頻繁に発生する可能性があるため、
+	// Warn や Info ではなく Debug レベルで出力します。
+	// 本番環境ではDebugログを無効にすることで、ログの量を削減できます。
+	//
+	// 【ログのフィールド名の慣例】
+	// req_lx: requested linear_x（要求された直進X速度）
+	// out_lx: output linear_x（出力された直進X速度）
+	// 短い名前を使うことで、ログの可読性を高めています。
+	if result.Clamped {
+		v.logger.Debug("Velocity clamped",
+			zap.Float64("req_lx", input.LinearX),
+			zap.Float64("req_ly", input.LinearY),
+			zap.Float64("req_az", input.AngularZ),
+			zap.Float64("out_lx", result.LinearX),
+			zap.Float64("out_ly", result.LinearY),
+			zap.Float64("out_az", result.AngularZ),
+		)
+	}
 
-return result
+	return result
 }
