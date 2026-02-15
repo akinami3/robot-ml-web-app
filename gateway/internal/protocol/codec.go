@@ -1,58 +1,175 @@
+// =============================================================================
+// ファイル: codec.go（コーデック = エンコーダー + デコーダー）
+// 概要: WebSocketメッセージのシリアライズ（直列化）とデシリアライズ（復元）を担当
+//
+// 【シリアライズ / デシリアライズとは？】
+//   シリアライズ（エンコード）: 構造体 → バイト列（送信可能な形式）
+//   デシリアライズ（デコード）: バイト列 → 構造体（プログラムで使える形式）
+//
+//   ネットワーク通信では、データをバイト列に変換して送受信する必要がある。
+//   このファイルでは、2つのフォーマットをサポートしています：
+//
+//   1. MessagePack（メッセージパック）: バイナリ形式のシリアライズフォーマット
+//      - JSONより高速で、データサイズが小さい
+//      - センサーデータのような大量データに最適
+//      - 人間が直接読めない（バイナリ形式）
+//
+//   2. JSON（ジェイソン）: テキスト形式のシリアライズフォーマット
+//      - 人間が読める（{"key": "value"} のような形式）
+//      - デバッグに便利
+//      - MessagePack より遅く、サイズが大きい
+//
+// 【設計パターン: Codec パターン（フォールバック戦略）】
+//   デフォルトは高速な MessagePack を使い、
+//   デコード失敗時は JSON にフォールバック（代替手段に切り替え）する。
+//   これにより、異なるクライアントからのメッセージも処理できる。
+// =============================================================================
 package protocol
 
 import (
-	"encoding/json"
+// encoding/json: Go 標準の JSON エンコード/デコードライブラリ。
+// json.Marshal()   : 構造体 → JSON バイト列
+// json.Unmarshal() : JSON バイト列 → 構造体
+"encoding/json"
 
-	"github.com/vmihailenco/msgpack/v5"
+// msgpack: MessagePack のエンコード/デコードライブラリ（外部パッケージ）。
+// msgpack.Marshal()   : 構造体 → MessagePack バイト列
+// msgpack.Unmarshal() : MessagePack バイト列 → 構造体
+// v5 はバージョン5を示す（Go のモジュールバージョニング）。
+"github.com/vmihailenco/msgpack/v5"
 )
 
-// Codec handles message encoding and decoding
+// =============================================================================
+// Codec: メッセージのエンコード・デコードを行う構造体
+//
+// 【Go言語の知識: 空の構造体】
+//   Codec はフィールドを持たない空の構造体。
+//   「状態を持たないが、メソッドを持つ型」を作るために使用。
+//   これは Java の「ユーティリティクラス」に似た考え方。
+//   メソッドをグループ化してまとめる役割がある。
+//
+// 【なぜ Codec 構造体を使うのか？】
+//   直接 msgpack.Marshal() を呼ぶ代わりに Codec を使う理由：
+//   - 将来、エンコード/デコードにカスタム処理を追加できる
+//   - テスト時にモック（偽物）に差し替えやすい
+//   - エンコード方式の変更が1箇所で済む
+// =============================================================================
 type Codec struct{}
 
-// NewCodec creates a new codec
+// =============================================================================
+// NewCodec: Codec のコンストラクタ関数
+//
+// 【Go言語の知識: コンストラクタパターン】
+//   Go にはクラスやコンストラクタがないため、New〇〇() 関数を慣例的に使う。
+//   空の構造体でも New 関数を用意するのは、将来フィールドが追加された時に
+//   呼び出し側のコードを変更しなくて済むようにするため。
+// =============================================================================
 func NewCodec() *Codec {
-	return &Codec{}
+return &Codec{}
 }
 
-// EncodeMsgpack encodes a message to MessagePack bytes
+// =============================================================================
+// EncodeMsgpack: Message 構造体を MessagePack 形式のバイト列に変換
+//
+// 【Go言語の知識: []byte（バイトスライス）】
+//   []byte はバイト列を表す型。ネットワーク通信やファイル I/O で使用。
+//   スライス（slice）は Go の可変長配列で、最も頻繁に使われるデータ構造。
+//
+// 【Go言語の知識: ([]byte, error) 多値返却】
+//   成功時: (バイト列, nil)
+//   失敗時: (nil, エラー)
+//   呼び出し側は err != nil でエラーの有無をチェックする。
+//
+// 【Go言語の知識: ポインタ引数 *Message】
+//   *Message はポインタ型で、Message のコピーではなく参照を渡す。
+//   大きな構造体のコピーを避け、効率的にデータを渡せる。
+// =============================================================================
 func (c *Codec) EncodeMsgpack(msg *Message) ([]byte, error) {
-	return msgpack.Marshal(msg)
+// msgpack.Marshal: 構造体をMessagePackバイト列にシリアライズする。
+// 構造体のフィールドに付いている `msgpack:"..."` タグに従って変換される。
+return msgpack.Marshal(msg)
 }
 
-// DecodeMsgpack decodes MessagePack bytes to a message
+// =============================================================================
+// DecodeMsgpack: MessagePack 形式のバイト列を Message 構造体に変換
+//
+// 【Go言語の知識: var による変数宣言】
+//   var msg Message は Message 型の変数をゼロ値で初期化する。
+//   ゼロ値: 文字列は ""、数値は 0、ポインタは nil になる。
+//
+// 【Go言語の知識: & 演算子（アドレス取得）】
+//   &msg は msg のメモリアドレス（ポインタ）を取得する。
+//   Unmarshal は受け取ったポインタが指す変数に直接値を書き込む。
+// =============================================================================
 func (c *Codec) DecodeMsgpack(data []byte) (*Message, error) {
-	var msg Message
-	if err := msgpack.Unmarshal(data, &msg); err != nil {
-		return nil, err
-	}
-	return &msg, nil
+var msg Message
+// msgpack.Unmarshal: バイト列を構造体にデシリアライズする。
+// &msg にデコード結果が書き込まれる（ポインタ渡し）。
+if err := msgpack.Unmarshal(data, &msg); err != nil {
+// デコード失敗時は nil と エラーを返す。
+return nil, err
+}
+// デコード成功時は構造体のポインタを返す。
+return &msg, nil
 }
 
-// EncodeJSON encodes a message to JSON bytes (fallback)
+// =============================================================================
+// EncodeJSON: Message 構造体を JSON 形式のバイト列に変換（フォールバック用）
+//
+// JSON は人間が読める形式で、デバッグやブラウザからのテストに便利。
+// 例: {"type":"sensor_data","robot_id":"mock-robot-1","ts":1234567890}
+//
+// 構造体のフィールドに付いている `json:"..."` タグに従って変換される。
+// =============================================================================
 func (c *Codec) EncodeJSON(msg *Message) ([]byte, error) {
-	return json.Marshal(msg)
+return json.Marshal(msg)
 }
 
-// DecodeJSON decodes JSON bytes to a message (fallback)
+// =============================================================================
+// DecodeJSON: JSON 形式のバイト列を Message 構造体に変換（フォールバック用）
+// =============================================================================
 func (c *Codec) DecodeJSON(data []byte) (*Message, error) {
-	var msg Message
-	if err := json.Unmarshal(data, &msg); err != nil {
-		return nil, err
-	}
-	return &msg, nil
+var msg Message
+if err := json.Unmarshal(data, &msg); err != nil {
+return nil, err
+}
+return &msg, nil
 }
 
-// Decode tries MessagePack first, then falls back to JSON
+// =============================================================================
+// Decode: バイト列を Message 構造体にデコードする汎用メソッド
+//
+// 【設計パターン: フォールバック（Fallback）戦略】
+//   まず MessagePack でのデコードを試み、失敗したら JSON で再試行する。
+//   これにより、どちらの形式で送られたメッセージも正しく処理できる。
+//
+//   なぜこのアプローチが良いのか：
+//   - WebSocketクライアント（ブラウザ）は通常 JSON を送る
+//   - ネイティブアプリの場合は MessagePack を送ることもある
+//   - 1つの関数で両方に対応できる
+//
+// 【Go言語の知識: 変数のシャドーイング（shadowing）に注意】
+//   外側の err と内側の err は同じ名前でも別の変数になることがある。
+//   ここでは msg と err をそれぞれの関数呼び出しで適切に処理している。
+// =============================================================================
 func (c *Codec) Decode(data []byte) (*Message, error) {
-	msg, err := c.DecodeMsgpack(data)
-	if err != nil {
-		// Fallback to JSON
-		return c.DecodeJSON(data)
-	}
-	return msg, nil
+// まず MessagePack でデコードを試みる。
+msg, err := c.DecodeMsgpack(data)
+if err != nil {
+// MessagePack でのデコードに失敗した場合、JSON にフォールバック。
+// JSON の方が緩い形式なので、テキストデータなら成功する可能性が高い。
+return c.DecodeJSON(data)
+}
+// MessagePack でのデコードに成功した場合はそのまま返す。
+return msg, nil
 }
 
-// Encode encodes to MessagePack by default
+// =============================================================================
+// Encode: Message 構造体をバイト列にエンコードするデフォルトメソッド
+//
+// デフォルトは MessagePack を使用（高速・コンパクト）。
+// 必要に応じて EncodeJSON() を直接呼ぶこともできる。
+// =============================================================================
 func (c *Codec) Encode(msg *Message) ([]byte, error) {
-	return c.EncodeMsgpack(msg)
+return c.EncodeMsgpack(msg)
 }

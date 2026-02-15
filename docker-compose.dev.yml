@@ -1,15 +1,60 @@
 # =============================================================================
 # Docker Compose - Development Overrides
+# Docker Compose - 開発環境用オーバーライド設定
 # =============================================================================
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# 【このファイルの役割】
+# docker-compose.yml（ベース設定）に対して、開発環境に特化した設定を
+# 「上書き（オーバーライド）」するファイルです。
+#
+# 【開発環境の特徴】
+# 1. ホットリロード: コードを変更すると自動的にアプリが再読み込みされる
+# 2. デバッグログ: 詳細なエラー情報が表示される
+# 3. ソースコードのマウント: コンテナ内にホストのソースコードを直接マウント
+# 4. データベースポートの公開: 開発ツール（pgAdminなど）から直接接続可能
+#
+# 【オーバーライドの仕組み】
+# 同じサービス名・同じキーを指定すると、ベース設定が上書きされます。
+# 新しいキーを追加すると、ベース設定にそのキーが追加されます。
+# 例: frontend の build.dockerfile を Dockerfile → Dockerfile.dev に変更
+#
+# Usage（使い方）: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# 【-f オプションの順番が重要！】
+# docker-compose.yml が最初に読み込まれ、docker-compose.dev.yml で上書きされます。
+# 順番を間違えると期待通りに動きません。
 
 services:
+  # ---------------------------------------------------------------------------
+  # Frontend（開発環境設定）
+  # ---------------------------------------------------------------------------
+  # 開発環境では Dockerfile.dev を使い、Vite の開発サーバーを起動します。
+  # 本番環境との違い:
+  # - Nginx ではなく Vite 開発サーバーを使用
+  # - ソースコードをボリュームマウント（ホットリロードのため）
+  # - ポート5173（Viteのデフォルトポート）を公開
   frontend:
     build:
       context: ./frontend
+      # 【Dockerfile.dev - 開発用Dockerfile】
+      # Dockerfile（本番用）とは異なる軽量なDockerfileを使います。
+      # 本番用はマルチステージビルドでNginxにコピーしますが、
+      # 開発用は npm install + npm run dev するだけのシンプルな構成です。
       dockerfile: Dockerfile.dev
+    # 【ポートマッピング】
+    # 5173: Vite開発サーバーのデフォルトポート
+    # ブラウザで http://localhost:5173 にアクセスするとフロントエンドが表示されます。
     ports:
       - "5173:5173"
+    # 【volumes - ホットリロードのためのソースコードマウント】
+    # ホストのソースコードディレクトリをコンテナ内にマウントします。
+    # → ホストでファイルを編集すると、コンテナ内にも即座に反映されます。
+    # → Viteがファイル変更を検知して、ブラウザを自動更新します。
+    #
+    # 【なぜ個別にマウントするの？（./frontend:/app ではない理由）】
+    # node_modules をマウントしないため。
+    # ホストとコンテナでOSが異なる場合、node_modules の内容が互換性を持たない
+    # ことがあるため、ソースコードのみをマウントします。
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
@@ -17,41 +62,96 @@ services:
       - ./frontend/vite.config.ts:/app/vite.config.ts
       - ./frontend/tsconfig.json:/app/tsconfig.json
     environment:
+      # NODE_ENV=development: 開発モード（詳細なエラー表示、デバッグツール有効化）
       - NODE_ENV=development
+      # VITE_API_BASE_URL: バックエンドAPIのURL
+      # 開発環境ではlocalhost経由でアクセス（ブラウザから直接）
       - VITE_API_BASE_URL=http://localhost:8000/api/v1
+      # VITE_WS_URL: WebSocket接続先のURL
       - VITE_WS_URL=ws://localhost:8080/ws
+      # PROXY_*: Viteのプロキシ設定（CORSエラー回避のため）
+      # ブラウザからのリクエストをViteが中継してバックエンドに転送します。
       - PROXY_BACKEND_URL=http://backend:8000
       - PROXY_WS_URL=ws://gateway:8080
+    # 【command - 起動コマンドの上書き】
+    # ベース設定のデフォルトコマンドを開発用に上書きします。
+    # --host 0.0.0.0: コンテナ外からのアクセスを許可（デフォルトはlocalhostのみ）
+    # --port 5173: ポート番号を明示的に指定
     command: npm run dev -- --host 0.0.0.0 --port 5173
 
+  # ---------------------------------------------------------------------------
+  # Backend（開発環境設定）
+  # ---------------------------------------------------------------------------
+  # 開発環境では uvicorn の --reload オプションでホットリロードを有効化します。
+  # Pythonファイルを編集すると、サーバーが自動的に再起動されます。
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
+    # 【volumes - バックエンドソースコードのマウント】
+    # Pythonソースコード、マイグレーション、テストをマウント
+    # → ファイル変更時に uvicorn が自動再起動します
+    #
+    # alembic: データベースマイグレーションツール
+    #   → テーブル構造の変更をバージョン管理するツール
     volumes:
       - ./backend/app:/app/app
       - ./backend/alembic:/app/alembic
       - ./backend/alembic.ini:/app/alembic.ini
       - ./backend/tests:/app/tests
       - ./backend/pyproject.toml:/app/pyproject.toml
+    # 【uvicorn --reload の意味】
+    # uvicorn: Python の ASGI サーバー（非同期Webサーバー）
+    # --reload: ファイル変更検知で自動再起動（開発時のみ使用！）
+    # --host 0.0.0.0: 全てのネットワークインターフェースでリッスン
+    # --port 8000: ポート番号
+    # --log-level debug: 詳細なログを出力（開発時のデバッグに必須）
+    #
+    # ⚠️ 注意: --reload は本番環境では絶対に使わないこと！
+    #   → パフォーマンスが悪く、セキュリティリスクがあります。
     command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --log-level debug
     environment:
       - ENVIRONMENT=development
+      # debug ログレベル: 全てのログメッセージを表示
+      # ログレベルの階層: debug < info < warning < error < critical
+      # debug が最も詳細で、critical が最も重要なもののみ
       - BACKEND_LOG_LEVEL=debug
 
+  # ---------------------------------------------------------------------------
+  # Gateway（開発環境設定）
+  # ---------------------------------------------------------------------------
+  # Go言語のゲートウェイも開発用にソースコードをマウントします。
+  # Go の air や realize などのホットリロードツールを使う場合に便利です。
   gateway:
     build:
       context: ./gateway
       dockerfile: Dockerfile.dev
+    # ソースコード全体をマウント（Goはコンパイル言語なので再ビルドが必要）
     volumes:
       - ./gateway:/app/src
     environment:
       - GATEWAY_LOG_LEVEL=debug
 
+  # ---------------------------------------------------------------------------
+  # PostgreSQL（開発環境設定）
+  # ---------------------------------------------------------------------------
+  # 開発環境ではデータベースのポートを外部に公開します。
+  # → pgAdmin、DBeaver などのGUIツールから直接データベースに接続できます。
   postgres:
+    # 【ポート 15432:5432 の意味】
+    # ホスト側のポートを 15432 にしているのは、ホストにもPostgreSQLが
+    # インストールされている場合にポート5432が衝突するのを避けるためです。
+    # 接続例: psql -h localhost -p 15432 -U robot_app -d robot_ai_db
     ports:
       - "15432:5432"
 
+  # ---------------------------------------------------------------------------
+  # Redis（開発環境設定）
+  # ---------------------------------------------------------------------------
+  # 開発環境ではRedisのポートも外部に公開します。
+  # → Redis Insight などのGUIツールから直接接続できます。
   redis:
+    # ホスト側ポート 16379 → コンテナ側ポート 6379
+    # 接続例: redis-cli -h localhost -p 16379 -a redis_password_change_me
     ports:
       - "16379:6379"

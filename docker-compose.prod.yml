@@ -1,33 +1,104 @@
 # =============================================================================
 # Docker Compose - Production Overrides
+# Docker Compose - 本番環境用オーバーライド設定
 # =============================================================================
-# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 【このファイルの役割】
+# 本番環境（ユーザーが実際に使う環境）に特化した設定を上書きします。
+#
+# 【本番環境と開発環境の主な違い】
+# 1. リソース制限（deploy.resources）: メモリ・CPU使用量を制限してサーバーの安定性を確保
+# 2. ログローテーション（logging）: ログファイルが際限なく大きくならないように制限
+# 3. パフォーマンス最適化: gunicorn + 複数ワーカー、PostgreSQLチューニング
+# 4. セキュリティ: データベースのポートを外部に公開しない
+# 5. ボリュームマウントなし: ソースコードはイメージに含める（ホットリロード不要）
+#
+# Usage（使い方）: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 【本番デプロイ前のチェックリスト】
+# ✅ .env ファイルのパスワードを全て変更したか
+# ✅ SECRET_KEY をランダムな文字列に変更したか
+# ✅ CORS_ORIGINS を本番のドメインに変更したか
+# ✅ SSL/TLS証明書を設定したか（HTTPSに対応）
+# ✅ バックアップを設定したか
 
 services:
+  # ---------------------------------------------------------------------------
+  # Frontend（本番環境設定）
+  # ---------------------------------------------------------------------------
+  # 本番環境では:
+  # - マルチステージビルドで最適化された静的ファイルを生成
+  # - Nginx で静的ファイルを配信（Vite開発サーバーは使わない）
+  # - リソース制限とログローテーションを設定
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # 【args - ビルド時引数】
+      # Docker イメージのビルド時にのみ使われる変数です。
+      # 環境変数と違い、実行時には存在しません。
+      # Viteはビルド時に環境変数をJavaScriptに埋め込むため、
+      # ビルド時に正しいURLを指定する必要があります。
       args:
         - VITE_API_BASE_URL=${VITE_API_BASE_URL}
         - VITE_WS_URL=${VITE_WS_URL}
+    # 本番環境のポートマッピング
+    # デフォルトはポート3000 → Nginxのポート80にマッピング
+    # Nginxはポート80（HTTP標準ポート）でリッスンします。
     ports:
       - "${FRONTEND_PORT:-3000}:80"
+    # 【deploy - デプロイ設定（Swarm/Compose用）】
+    # コンテナのリソース使用量を制限します。
+    # リソース制限がないと、1つのコンテナがサーバーのリソースを使い切って
+    # 他のサービスが停止する危険があります。
     deploy:
       resources:
         limits:
+          # memory: メモリ上限（256MB）
+          # Nginxは静的ファイル配信なのでメモリは少なくて済みます。
           memory: 256M
+          # cpus: CPU使用率上限（0.5 = 50%）
           cpus: "0.5"
+    # 【logging - ログ設定】
+    # Docker のログドライバーとオプションを設定します。
+    # ログローテーション: ログファイルが一定サイズを超えると新しいファイルに切り替え
+    #
+    # なぜログローテーションが必要？
+    # → ログが無制限に増えると、ディスクが一杯になってサーバーが停止します。
+    #   本番環境では必ず設定しましょう！
     logging:
+      # json-file: Docker標準のログドライバー（JSON形式でファイルに保存）
       driver: json-file
       options:
+        # max-size: 1ファイルの最大サイズ（10MB）
         max-size: "10m"
+        # max-file: 保持するファイル数（3ファイル = 最大30MB）
         max-file: "3"
 
+  # ---------------------------------------------------------------------------
+  # Backend（本番環境設定）
+  # ---------------------------------------------------------------------------
+  # 本番環境では:
+  # - gunicorn + uvicorn ワーカーで複数プロセスによる並行処理
+  # - --reload は使わない（パフォーマンスとセキュリティのため）
+  # - リソース制限を大きめに設定（API処理は負荷が高い）
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    # 【gunicorn - 本番用WSGIサーバー】
+    # gunicorn は Python の本番用Webサーバーです。
+    # 開発時の uvicorn --reload とは異なり、安定性とパフォーマンスに優れています。
+    #
+    # --workers: ワーカープロセス数（推奨: CPUコア数 × 2 + 1）
+    #   → 4ワーカー = 4つの独立したプロセスで並行してリクエストを処理
+    #   → 1つのワーカーがクラッシュしても他のワーカーが処理を続行
+    # --worker-class: ワーカーのタイプ（uvicorn.workers.UvicornWorker = 非同期処理対応）
+    # --bind: リッスンするアドレスとポート
+    # --access-logfile -: アクセスログを標準出力に出力（Dockerのログに統合）
+    # --error-logfile -: エラーログを標準出力に出力
+    # --timeout 120: リクエストのタイムアウト（120秒）
+    #   → AI処理は時間がかかるため長めに設定
     command: >
       gunicorn app.main:app
       --workers ${BACKEND_WORKERS:-4}
@@ -38,27 +109,36 @@ services:
       --timeout 120
     environment:
       - ENVIRONMENT=production
+      # info ログレベル: 重要な情報のみ表示（debug は本番では不要）
       - BACKEND_LOG_LEVEL=info
     deploy:
       resources:
         limits:
+          # バックエンドはAI処理やDB操作があるため、リソースを多めに割当
           memory: 1G
           cpus: "2.0"
     logging:
       driver: json-file
       options:
+        # バックエンドはログが多いため、フロントエンドより大きめに設定
         max-size: "50m"
         max-file: "5"
 
+  # ---------------------------------------------------------------------------
+  # Gateway（本番環境設定）
+  # ---------------------------------------------------------------------------
   gateway:
     build:
       context: ./gateway
       dockerfile: Dockerfile
     environment:
+      # 本番環境ではログレベルを info に
+      # → debug ログは量が多くパフォーマンスに影響するため
       - GATEWAY_LOG_LEVEL=info
     deploy:
       resources:
         limits:
+          # WebSocket接続を多数処理するため、メモリを512MBに設定
           memory: 512M
           cpus: "1.0"
     logging:
@@ -67,13 +147,32 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  # ---------------------------------------------------------------------------
+  # PostgreSQL（本番環境設定）
+  # ---------------------------------------------------------------------------
+  # 本番環境では:
+  # - ポートを外部に公開しない（セキュリティ最優先！）
+  # - PostgreSQLのパフォーマンスパラメータをチューニング
+  # - リソースを大きく割り当て（データベースは最も重要なサービス）
   postgres:
+    # 【ports: [] - ポートを公開しない】
+    # 空の配列を指定することで、ベース設定のポートマッピングを無効化します。
+    # 本番環境ではデータベースを外部に公開してはいけません！
+    # → 攻撃者がデータベースに直接アクセスできてしまいます。
+    # → データベースへのアクセスはバックエンド経由のみに限定します。
     ports: []  # Don't expose in production
     deploy:
       resources:
         limits:
+          # データベースはメモリとCPUを多く使うため、大きく割り当て
           memory: 2G
           cpus: "2.0"
+    # 【PostgreSQLチューニングパラメータ】
+    # デフォルト設定は小さなサーバー向けなので、本番環境では調整が必要です。
+    # これらの値はサーバーのスペックに合わせて調整してください。
+    #
+    # 参考ツール: https://pgtune.leopard.in.ua/
+    # → サーバーのスペックを入力すると、最適な設定値を提案してくれます。
     command: >
       postgres
       -c shared_buffers=512MB
@@ -86,13 +185,28 @@ services:
       -c default_statistics_target=100
       -c random_page_cost=1.1
       -c effective_io_concurrency=200
+    # 【各パラメータの説明】
+    # shared_buffers: PostgreSQLが使うキャッシュメモリ（サーバーRAMの25%が目安）
+    # effective_cache_size: OSのファイルキャッシュを含む利用可能メモリの推定値
+    # work_mem: ソート・ハッシュ操作に使うメモリ（1クエリあたり）
+    # maintenance_work_mem: VACUUM, CREATE INDEX 等の管理操作に使うメモリ
+    # max_connections: 最大同時接続数（ワーカー数 × 2 程度）
+    # checkpoint_completion_target: チェックポイントの書き込み分散率
+    # wal_buffers: WAL（Write-Ahead Log）のバッファサイズ
+    # default_statistics_target: クエリプランナーの統計精度（高いほど正確だが遅い）
+    # random_page_cost: ランダムI/Oのコスト推定値（SSDなら1.1、HDDなら4.0）
+    # effective_io_concurrency: 同時実行できるI/O操作数（SSDなら200、HDDなら2）
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "5"
 
+  # ---------------------------------------------------------------------------
+  # Redis（本番環境設定）
+  # ---------------------------------------------------------------------------
   redis:
+    # データベースと同様、本番環境ではポートを外部に公開しない
     ports: []  # Don't expose in production
     deploy:
       resources:
@@ -100,10 +214,18 @@ services:
           memory: 512M
           cpus: "0.5"
 
+  # ---------------------------------------------------------------------------
+  # Ollama（本番環境設定）
+  # ---------------------------------------------------------------------------
+  # AI推論は非常にリソースを消費するため、大きめに設定
+  # GPU対応の場合は、runtime: nvidia を追加することでGPUを使えます。
   ollama:
     deploy:
       resources:
         limits:
+          # 8GB: LLMの推論にはメモリが大量に必要
+          # モデルサイズに応じて調整してください
+          # llama3 8B → 約8GB、llama3 70B → 約40GB
           memory: 8G
           cpus: "4.0"
     logging:

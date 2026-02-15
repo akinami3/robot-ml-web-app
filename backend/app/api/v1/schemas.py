@@ -1,226 +1,509 @@
 """Pydantic schemas for API request/response."""
 
+# =============================================================================
+# Pydanticスキーマ（Schemas）- APIリクエスト/レスポンスのデータ定義
+# =============================================================================
+#
+# 【スキーマ（Schema）とは？】
+# スキーマとは、「データの形・構造・ルール」を定義したものです。
+# 例えば、「ユーザー登録」のリクエストには、
+# 「ユーザー名（文字列）」「メール（メール形式）」「パスワード（8文字以上）」
+# が必要です、という「型紙」のようなものです。
+#
+# 【スキーマ vs エンティティ（Entity）の違い】
+# - スキーマ : API通信用のデータ構造（外部とのやり取り用）
+#              → クライアント（フロントエンド）との「契約書」
+# - エンティティ : ビジネスロジック用のデータ構造（内部処理用）
+#              → アプリ内部の「データモデル」
+#
+# なぜ分けるのか？
+#   1. セキュリティ : パスワードハッシュなど内部データをAPIに露出させない
+#   2. 柔軟性 : APIの形式を変えても内部ロジックに影響しない
+#   3. バリデーション : 入力データの検証ルールをスキーマに集約できる
+#
+# 【リクエスト/レスポンスパターン】
+# - XxxRequest / XxxCreate : クライアント → サーバーへの送信データ
+# - XxxResponse            : サーバー → クライアントへの返却データ
+# - XxxUpdate              : 既存データの部分更新用
+# - XxxQuery               : 検索条件を指定するためのデータ
+#
+# 【Pydantic BaseModelとは？】
+# PydanticはPythonのデータバリデーション（検証）ライブラリです。
+# BaseModelを継承したクラスにフィールドを定義すると、
+# 自動的に以下の機能が得られます：
+#   - 型チェック（strにintを渡すとエラー）
+#   - データ変換（文字列の"123"をintの123に自動変換）
+#   - バリデーション（最小文字数、メール形式のチェックなど）
+#   - JSONシリアライズ/デシリアライズ（JSON⟷Pythonオブジェクトの変換）
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# from __future__ import annotations
+# Python 3.10+の型ヒント記法（例: str | None）を古いバージョンでも使えるようにする
+# これにより「Optional[str]」の代わりに「str | None」と簡潔に書けます
+# ---------------------------------------------------------------------------
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Python標準ライブラリからのインポート
+# - datetime : 日時を扱うクラス（作成日時、更新日時などに使用）
+# - Any      : 任意の型を表す特殊な型ヒント（どんな型でもOK）
+# - UUID     : 世界で一意な識別子（例: "550e8400-e29b-41d4-a716-446655440000"）
+#              → データベースのIDとして使われる（連番よりも安全）
+# ---------------------------------------------------------------------------
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+# ---------------------------------------------------------------------------
+# Pydanticからのインポート
+#
+# - BaseModel : 全スキーマの親クラス。これを継承してデータモデルを作ります
+# - EmailStr  : メールアドレス専用の型。形式が正しいか自動検証します
+#               例: "user@example.com" → OK, "invalid" → エラー
+# - Field     : フィールドに追加の制約（バリデーションルール）を設定するための関数
+#               例: Field(..., min_length=3) → 最低3文字必須
+#               「...」はEllipsisで「この値は必須（省略不可）」を意味します
+# ---------------------------------------------------------------------------
 from pydantic import BaseModel, EmailStr, Field
 
 
 # ─── Auth ────────────────────────────────────────────────────────────────────
+# 認証（Authentication）関連のスキーマ
+# 認証とは「あなたは誰ですか？」を確認するプロセスです
 
 
+# ---------------------------------------------------------------------------
+# ログインリクエスト
+# クライアントがログインする際に送信するデータ
+#
+# 使用例（JSON）:
+#   POST /api/v1/auth/login
+#   { "username": "tanaka", "password": "mypassword123" }
+# ---------------------------------------------------------------------------
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str       # ユーザー名（文字列型、必須）
+    password: str       # パスワード（文字列型、必須）
 
 
+# ---------------------------------------------------------------------------
+# トークンレスポンス
+# ログイン成功時にサーバーから返されるトークン（認証情報）
+#
+# 【JWT（JSON Web Token）認証の流れ】
+#   1. クライアントがユーザー名＋パスワードを送信
+#   2. サーバーが検証し、access_tokenとrefresh_tokenを返す
+#   3. 以降、クライアントはaccess_tokenをリクエストヘッダーに付けてAPIを利用
+#   4. access_tokenの有効期限が切れたらrefresh_tokenで新しいトークンを取得
+#
+# token_type = "bearer" は「持参人トークン」という意味で、
+# リクエストヘッダーに「Authorization: Bearer <token>」と付けて使います
+# ---------------------------------------------------------------------------
 class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
+    access_token: str                   # アクセストークン（API利用時に使う短期トークン）
+    refresh_token: str                  # リフレッシュトークン（アクセストークンの再発行用）
+    token_type: str = "bearer"          # トークン種別（デフォルト値: "bearer"）
+    expires_in: int                     # 有効期限（秒数）
 
 
+# ---------------------------------------------------------------------------
+# リフレッシュトークンリクエスト
+# アクセストークンの有効期限が切れた時に、新しいトークンを取得するためのリクエスト
+# ---------------------------------------------------------------------------
 class RefreshTokenRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str  # 以前受け取ったリフレッシュトークン
 
 
+# ---------------------------------------------------------------------------
+# ユーザー作成リクエスト
+#
+# 【Fieldバリデーションの解説】
+# - Field(..., min_length=3, max_length=100)
+#   - 「...」（Ellipsis）: この値は必須（省略不可）であることを示す
+#   - min_length=3 : 最低3文字以上
+#   - max_length=100 : 最大100文字以下
+#   → これにより「ab」のような短すぎるユーザー名は自動的に拒否されます
+#
+# - Field(..., min_length=8)
+#   → パスワードは最低8文字以上（セキュリティの基本要件）
+#
+# - EmailStr型
+#   → メールアドレスの形式を自動検証（例: "@"が含まれているか等）
+#
+# - role: str = "viewer"
+#   → デフォルト値が"viewer"。指定しなければ閲覧専用ユーザーとして作成される
+#
+# 使用例（JSON）:
+#   POST /api/v1/users
+#   {
+#     "username": "tanaka_taro",
+#     "email": "tanaka@example.com",
+#     "password": "securePass123",
+#     "role": "operator"
+#   }
+# ---------------------------------------------------------------------------
 class UserCreate(BaseModel):
-    username: str = Field(..., min_length=3, max_length=100)
-    email: EmailStr
-    password: str = Field(..., min_length=8)
-    role: str = "viewer"
+    username: str = Field(..., min_length=3, max_length=100)  # ユーザー名（3〜100文字）
+    email: EmailStr                                            # メールアドレス（形式自動検証）
+    password: str = Field(..., min_length=8)                   # パスワード（8文字以上）
+    role: str = "viewer"                                       # 権限ロール（デフォルト: 閲覧者）
 
 
+# ---------------------------------------------------------------------------
+# ユーザーレスポンス
+# サーバーからクライアントに返すユーザー情報
+#
+# 【model_config = {"from_attributes": True} の意味】
+# これはPydantic v2の設定で、SQLAlchemyのORMモデル（データベースのオブジェクト）
+# から直接Pydanticモデルに変換できるようにします。
+#
+# 通常、Pydanticはdict（辞書）からデータを読み込みますが、
+# from_attributes=True にすると、オブジェクトの属性（attribute）からも
+# データを読み込めるようになります。
+#
+# 例:
+#   db_user = User(id=..., username="tanaka", ...)  # SQLAlchemyオブジェクト
+#   response = UserResponse.model_validate(db_user)  # ← これが可能になる！
+#
+# ※ パスワード（ハッシュ）はレスポンスに含まれていないことに注目！
+#   これがスキーマとエンティティを分ける重要な理由の1つです。
+# ---------------------------------------------------------------------------
 class UserResponse(BaseModel):
-    id: UUID
-    username: str
-    email: str
-    role: str
-    is_active: bool
-    created_at: datetime
+    id: UUID                # ユーザーの一意識別子（UUID形式）
+    username: str           # ユーザー名
+    email: str              # メールアドレス
+    role: str               # 権限ロール（admin/operator/viewer）
+    is_active: bool         # アカウントが有効かどうか
+    created_at: datetime    # アカウント作成日時
 
     model_config = {"from_attributes": True}
 
 
+# ---------------------------------------------------------------------------
+# ユーザー更新リクエスト
+#
+# 【部分更新（Partial Update）パターン】
+# 全フィールドが「None（なし）」を許容しています（「| None = None」）。
+# これにより、変更したいフィールドだけを送信できます。
+# 例: メールだけ変更する場合 → {"email": "new@example.com"}
+# 変更しないフィールドはNoneのまま → サーバー側で「変更なし」と判断
+# ---------------------------------------------------------------------------
 class UserUpdate(BaseModel):
-    email: EmailStr | None = None
-    role: str | None = None
-    is_active: bool | None = None
+    email: EmailStr | None = None       # 新しいメールアドレス（省略可能）
+    role: str | None = None             # 新しいロール（省略可能）
+    is_active: bool | None = None       # アクティブ状態の変更（省略可能）
 
 
 # ─── Robots ──────────────────────────────────────────────────────────────────
+# ロボット管理関連のスキーマ
 
 
+# ---------------------------------------------------------------------------
+# ロボット作成リクエスト
+#
+# 【Field(default_factory=dict) の意味】
+# Pythonでは、デフォルト値にミュータブル（変更可能）なオブジェクト
+# （dict, listなど）を直接指定するのは危険です。
+# 全インスタンスが同じオブジェクトを共有してしまうためです。
+# default_factory=dict と書くことで、毎回新しい空のdictが生成されます。
+#
+# connection_paramsには、ロボットとの接続に必要なパラメータを自由に格納します。
+# 例: {"ip": "192.168.1.100", "port": 8080, "protocol": "ros2"}
+# ---------------------------------------------------------------------------
 class RobotCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
-    adapter_type: str
-    connection_params: dict[str, Any] = Field(default_factory=dict)
+    name: str = Field(..., min_length=1, max_length=200)    # ロボット名（1〜200文字）
+    adapter_type: str                                        # アダプタ種別（通信方式）
+    connection_params: dict[str, Any] = Field(default_factory=dict)  # 接続パラメータ
 
 
+# ---------------------------------------------------------------------------
+# ロボットレスポンス
+# ロボットの詳細情報をクライアントに返す
+#
+# battery_level と last_seen が「None許容」なのは、
+# まだバッテリー情報が取得できていない場合や、
+# まだ一度も通信していないロボットに対応するためです。
+# ---------------------------------------------------------------------------
 class RobotResponse(BaseModel):
-    id: UUID
-    name: str
-    adapter_type: str
-    state: str
-    capabilities: list[str]
-    battery_level: float | None = None
-    last_seen: datetime | None = None
-    created_at: datetime
+    id: UUID                                    # ロボットの一意識別子
+    name: str                                   # ロボット名
+    adapter_type: str                           # アダプタ種別
+    state: str                                  # 現在の状態（例: "online", "offline"）
+    capabilities: list[str]                     # 利用可能な機能のリスト
+    battery_level: float | None = None          # バッテリー残量（%）、不明ならNone
+    last_seen: datetime | None = None           # 最後に通信した日時
+    created_at: datetime                        # 登録日時
 
     model_config = {"from_attributes": True}
 
 
+# ---------------------------------------------------------------------------
+# ロボット更新リクエスト
+# ロボット名や接続パラメータを部分的に更新するためのスキーマ
+# ---------------------------------------------------------------------------
 class RobotUpdate(BaseModel):
-    name: str | None = None
-    connection_params: dict[str, Any] | None = None
+    name: str | None = None                                 # 新しいロボット名（省略可能）
+    connection_params: dict[str, Any] | None = None         # 新しい接続パラメータ（省略可能）
 
 
 # ─── Sensor Data ─────────────────────────────────────────────────────────────
+# センサーデータ関連のスキーマ
+# ロボットに搭載されたセンサー（カメラ、LiDAR、IMUなど）のデータを扱います
 
 
+# ---------------------------------------------------------------------------
+# センサーデータレスポンス
+# 一件のセンサーデータを返すスキーマ
+#
+# data フィールドは dict[str, Any] 型です。
+# センサーの種類によってデータ構造が異なるため、柔軟なdict型を使用しています。
+# 例:
+#   LiDARの場合: {"ranges": [1.2, 3.4, ...], "angle_min": -3.14}
+#   IMUの場合:   {"acceleration": {"x": 0.1, "y": 0.2, "z": 9.8}}
+# ---------------------------------------------------------------------------
 class SensorDataResponse(BaseModel):
-    id: UUID
-    robot_id: UUID
-    sensor_type: str
-    data: dict[str, Any]
-    timestamp: datetime
-    session_id: UUID | None = None
-    sequence_number: int = 0
+    id: UUID                                # データの一意識別子
+    robot_id: UUID                          # どのロボットのデータか
+    sensor_type: str                        # センサーの種類（例: "lidar", "camera"）
+    data: dict[str, Any]                    # センサーの計測データ（自由形式）
+    timestamp: datetime                     # 計測日時
+    session_id: UUID | None = None          # 記録セッションのID（あれば）
+    sequence_number: int = 0                # データの順序番号
 
     model_config = {"from_attributes": True}
 
 
+# ---------------------------------------------------------------------------
+# センサーデータクエリ
+# センサーデータを検索するための条件を指定するスキーマ
+#
+# 【Fieldのge（greater than or equal）とle（less than or equal）】
+# - ge=1     : 1以上（ge = greater than or equal to）
+# - le=10000 : 10000以下（le = less than or equal to）
+# これにより、limitの値は1〜10000の範囲に制限されます。
+# 0件や100万件のリクエストを防ぐ安全装置です。
+# ---------------------------------------------------------------------------
 class SensorDataQuery(BaseModel):
-    robot_id: UUID
-    sensor_type: str | None = None
-    start_time: datetime | None = None
-    end_time: datetime | None = None
-    limit: int = Field(default=100, ge=1, le=10000)
+    robot_id: UUID                                      # 対象ロボットのID（必須）
+    sensor_type: str | None = None                      # センサー種別（省略可→全種別検索）
+    start_time: datetime | None = None                  # 検索開始日時（省略可）
+    end_time: datetime | None = None                    # 検索終了日時（省略可）
+    limit: int = Field(default=100, ge=1, le=10000)     # 取得件数上限（1〜10000、デフォルト100）
 
 
+# ---------------------------------------------------------------------------
+# 集約データクエリ
+# センサーデータを一定時間ごとに集約（平均値など）して取得するためのスキーマ
+#
+# bucket_seconds は集約の時間間隔（秒単位）です。
+# 例: bucket_seconds=60 → 1分ごとにデータを集約
+#     bucket_seconds=3600 → 1時間ごとにデータを集約
+# ---------------------------------------------------------------------------
 class AggregatedDataQuery(BaseModel):
-    robot_id: UUID
-    sensor_type: str
-    start_time: datetime
-    end_time: datetime
-    bucket_seconds: int = Field(default=60, ge=1, le=86400)
+    robot_id: UUID                                          # 対象ロボットのID
+    sensor_type: str                                        # センサー種別
+    start_time: datetime                                    # 集約開始日時
+    end_time: datetime                                      # 集約終了日時
+    bucket_seconds: int = Field(default=60, ge=1, le=86400) # 集約間隔秒数（1秒〜86400秒=24時間）
 
 
 # ─── Datasets ────────────────────────────────────────────────────────────────
+# データセット関連のスキーマ
+# データセットとは、機械学習（ML）の学習・評価に使うデータの集まりです
 
 
+# ---------------------------------------------------------------------------
+# データセット作成リクエスト
+#
+# robot_ids と sensor_types で、どのロボットのどのセンサーのデータを
+# データセットに含めるかを指定します。
+# tags は検索やフィルタリングのためのラベル（例: ["training", "outdoor"]）
+# ---------------------------------------------------------------------------
 class DatasetCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
-    description: str = ""
-    robot_ids: list[UUID]
-    sensor_types: list[str]
-    start_time: datetime | None = None
-    end_time: datetime | None = None
-    tags: list[str] = Field(default_factory=list)
+    name: str = Field(..., min_length=1, max_length=200)  # データセット名
+    description: str = ""                                  # 説明文（省略可）
+    robot_ids: list[UUID]                                  # 含めるロボットのIDリスト
+    sensor_types: list[str]                                # 含めるセンサー種別のリスト
+    start_time: datetime | None = None                     # データの開始日時（省略可）
+    end_time: datetime | None = None                       # データの終了日時（省略可）
+    tags: list[str] = Field(default_factory=list)          # タグのリスト（デフォルト: 空リスト）
 
 
+# ---------------------------------------------------------------------------
+# データセットレスポンス
+# データセットの詳細情報をクライアントに返すスキーマ
+# ---------------------------------------------------------------------------
 class DatasetResponse(BaseModel):
-    id: UUID
-    name: str
-    description: str
-    owner_id: UUID
-    status: str
-    sensor_types: list[str]
-    robot_ids: list[UUID]
-    start_time: datetime | None = None
-    end_time: datetime | None = None
-    record_count: int
-    size_bytes: int
-    tags: list[str]
-    created_at: datetime
+    id: UUID                                    # データセットの一意識別子
+    name: str                                   # データセット名
+    description: str                            # 説明文
+    owner_id: UUID                              # 作成者のユーザーID
+    status: str                                 # 状態（"pending", "ready", "error"など）
+    sensor_types: list[str]                     # 含まれるセンサー種別
+    robot_ids: list[UUID]                       # 含まれるロボットのID
+    start_time: datetime | None = None          # データの開始日時
+    end_time: datetime | None = None            # データの終了日時
+    record_count: int                           # レコード（データ件数）
+    size_bytes: int                             # データサイズ（バイト単位）
+    tags: list[str]                             # タグのリスト
+    created_at: datetime                        # 作成日時
 
     model_config = {"from_attributes": True}
 
 
+# ---------------------------------------------------------------------------
+# データセットエクスポートリクエスト
+# データセットをファイルとしてダウンロードする際のフォーマット指定
+#   - "csv"     : カンマ区切りテキスト（Excelで開ける）
+#   - "parquet" : 列指向バイナリ形式（大量データに高速）
+#   - "json"    : JSON形式（Web APIで扱いやすい）
+# ---------------------------------------------------------------------------
 class DatasetExportRequest(BaseModel):
     format: str = "csv"  # csv, parquet, json
 
 
 # ─── Recording ───────────────────────────────────────────────────────────────
+# 記録（Recording）関連のスキーマ
+# ロボットのセンサーデータをリアルタイムで記録する機能
 
 
+# ---------------------------------------------------------------------------
+# 記録開始リクエスト
+#
+# max_frequency_hz は各センサーの最大記録頻度（Hz = 1秒あたりの回数）
+# 例: {"lidar": 10.0, "camera": 30.0}
+# → LiDARは毎秒10回、カメラは毎秒30回まで記録
+# ---------------------------------------------------------------------------
 class RecordingStartRequest(BaseModel):
-    robot_id: UUID
-    sensor_types: list[str] = Field(default_factory=list)
-    max_frequency_hz: dict[str, float] = Field(default_factory=dict)
+    robot_id: UUID                                              # 記録対象のロボットID
+    sensor_types: list[str] = Field(default_factory=list)       # 記録するセンサー種別
+    max_frequency_hz: dict[str, float] = Field(default_factory=dict)  # 各センサーの最大記録頻度
 
 
+# ---------------------------------------------------------------------------
+# 記録レスポンス
+# 記録セッションの状態情報を返すスキーマ
+# ---------------------------------------------------------------------------
 class RecordingResponse(BaseModel):
-    id: UUID
-    robot_id: UUID
-    user_id: UUID
-    is_active: bool
-    record_count: int
-    size_bytes: int
-    started_at: datetime
-    stopped_at: datetime | None = None
-    config: dict = Field(default_factory=dict)
+    id: UUID                                        # 記録セッションの一意識別子
+    robot_id: UUID                                  # 対象ロボットのID
+    user_id: UUID                                   # 記録を開始したユーザーのID
+    is_active: bool                                 # 記録中かどうか
+    record_count: int                               # 現在までの記録件数
+    size_bytes: int                                 # 現在までのデータサイズ
+    started_at: datetime                            # 記録開始日時
+    stopped_at: datetime | None = None              # 記録停止日時（記録中はNone）
+    config: dict = Field(default_factory=dict)      # 記録設定
 
     model_config = {"from_attributes": True}
 
 
 # ─── RAG ─────────────────────────────────────────────────────────────────────
+# RAG（Retrieval-Augmented Generation：検索拡張生成）関連のスキーマ
+#
+# RAGとは、AIが質問に答える際に、事前に登録されたドキュメントから
+# 関連情報を「検索（Retrieval）」して、その情報を元に「生成（Generation）」
+# する技術です。これにより、AIが最新の情報や専門知識に基づいた回答を生成できます。
 
 
+# ---------------------------------------------------------------------------
+# RAGドキュメントレスポンス
+# 登録されたドキュメントの情報
+# chunk_count はドキュメントを何個の「チャンク（断片）」に分割したかを示します。
+# AIが検索しやすいように、長い文書は小さな断片に分割して保存されます。
+# ---------------------------------------------------------------------------
 class RAGDocumentResponse(BaseModel):
-    id: UUID
-    title: str
-    source: str
-    file_type: str
-    file_size: int
-    chunk_count: int
-    created_at: datetime
+    id: UUID                # ドキュメントの一意識別子
+    title: str              # ドキュメントのタイトル
+    source: str             # 情報源（ファイル名やURLなど）
+    file_type: str          # ファイルタイプ（例: "pdf", "txt", "md"）
+    file_size: int          # ファイルサイズ（バイト）
+    chunk_count: int        # チャンク（分割断片）の数
+    created_at: datetime    # 登録日時
 
     model_config = {"from_attributes": True}
 
 
+# ---------------------------------------------------------------------------
+# RAGクエリリクエスト
+# AIに質問する際のリクエストスキーマ
+#
+# - top_k : 検索結果の上位何件を使うか（1〜20件）
+# - min_similarity : 最低類似度スコア（0.0〜1.0）
+#   → 0.7 = 70%以上類似したドキュメントだけを使用
+#   → 値を高くすると厳密な検索、低くすると幅広い検索になる
+# ---------------------------------------------------------------------------
 class RAGQueryRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=2000)
-    top_k: int = Field(default=5, ge=1, le=20)
-    min_similarity: float = Field(default=0.7, ge=0.0, le=1.0)
+    question: str = Field(..., min_length=1, max_length=2000)  # 質問文（1〜2000文字）
+    top_k: int = Field(default=5, ge=1, le=20)                # 参照するドキュメント数
+    min_similarity: float = Field(default=0.7, ge=0.0, le=1.0) # 最低類似度閾値
 
 
+# ---------------------------------------------------------------------------
+# RAGクエリレスポンス
+# AIの回答結果を返すスキーマ
+# ---------------------------------------------------------------------------
 class RAGQueryResponse(BaseModel):
-    answer: str
-    sources: list[dict]
-    context_used: bool
+    answer: str             # AIが生成した回答文
+    sources: list[dict]     # 回答の根拠となったドキュメント情報のリスト
+    context_used: bool      # ドキュメントのコンテキストが実際に使われたかどうか
 
 
 # ─── Audit ───────────────────────────────────────────────────────────────────
+# 監査ログ（Audit Log）関連のスキーマ
+# 「誰が」「いつ」「何をしたか」を記録する仕組みです。
+# セキュリティ上の問題が発生した際の調査や、運用の監視に使います。
 
 
+# ---------------------------------------------------------------------------
+# 監査ログレスポンス
+# ---------------------------------------------------------------------------
 class AuditLogResponse(BaseModel):
-    id: UUID
-    user_id: UUID
-    action: str
-    resource_type: str
-    resource_id: str
-    details: dict
-    ip_address: str
-    timestamp: datetime
+    id: UUID                # ログの一意識別子
+    user_id: UUID           # 操作を行ったユーザーのID
+    action: str             # 実行した操作（例: "login", "create_robot", "delete_user"）
+    resource_type: str      # 操作対象の種類（例: "robot", "dataset"）
+    resource_id: str        # 操作対象のID
+    details: dict           # 詳細情報（変更前後の値など）
+    ip_address: str         # 操作元のIPアドレス
+    timestamp: datetime     # 操作日時
 
     model_config = {"from_attributes": True}
 
 
 # ─── Common ──────────────────────────────────────────────────────────────────
+# 共通スキーマ（複数のエンドポイントで使い回す汎用的なスキーマ）
 
 
+# ---------------------------------------------------------------------------
+# ページネーション（ページ分割）レスポンス
+#
+# 【ページネーションとは？】
+# 大量のデータを一度に返すと、サーバーもクライアントも遅くなります。
+# そこで、データを「ページ」に分けて少しずつ返す仕組みです。
+#
+# 例: 全1000件のロボットデータを、100件ずつ10ページに分けて返す
+#   → page 1: offset=0,   limit=100 → items[0..99],   total=1000
+#   → page 2: offset=100, limit=100 → items[100..199], total=1000
+#
+# - total  : データの総件数
+# - offset : 何件目から取得するか（0始まり）
+# - limit  : 1ページあたりの件数
+# ---------------------------------------------------------------------------
 class PaginatedResponse(BaseModel):
-    items: list[Any]
-    total: int
-    offset: int
-    limit: int
+    items: list[Any]    # 現在のページのデータリスト
+    total: int          # 全体のデータ件数
+    offset: int         # 開始位置（何件目から）
+    limit: int          # 1ページあたりの件数
 
 
+# ---------------------------------------------------------------------------
+# エラーレスポンス
+# APIでエラーが発生した際に返す統一フォーマット
+#
+# 使用例:
+#   {"detail": "ロボットが見つかりません", "code": "NOT_FOUND"}
+# ---------------------------------------------------------------------------
 class ErrorResponse(BaseModel):
-    detail: str
-    code: str = ""
+    detail: str         # エラーの詳細メッセージ
+    code: str = ""      # エラーコード（プログラムで判別するための短いコード）

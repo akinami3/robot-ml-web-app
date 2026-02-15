@@ -1,73 +1,209 @@
 # =============================================================================
 # Robot AI Web Application - Docker Compose (Base Configuration)
+# ロボットAI Webアプリケーション - Docker Compose（ベース設定ファイル）
 # =============================================================================
-# Usage:
-#   Development: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-#   Production:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 【Docker Composeとは？】
+# 複数のDockerコンテナ（サービス）をまとめて定義・管理するためのツールです。
+# このファイル1つで、フロントエンド、バックエンド、データベースなど
+# アプリケーション全体のインフラを定義できます。
+#
+# 【このファイルの役割】
+# これは「ベース設定ファイル」です。開発環境・本番環境に共通する設定を書きます。
+# 環境ごとの違い（ポート公開、リソース制限など）は別ファイルで上書き（オーバーライド）します。
+#
+# 【オーバーライドの仕組み】
+# Docker Composeでは、複数の設定ファイルを -f オプションで重ねて読み込めます。
+# 後から読み込んだファイルの設定が優先されます（上書き）。
+# 例：docker-compose.yml の ports を docker-compose.dev.yml で変更できる
+#
+# Usage（使い方）:
+#   Development（開発環境）: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#   Production（本番環境）:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 【よく使うコマンド】
+#   docker compose up -d       → 全サービスをバックグラウンドで起動
+#   docker compose down         → 全サービスを停止・削除
+#   docker compose logs -f      → ログをリアルタイム表示
+#   docker compose ps           → 実行中のサービス一覧
+#   docker compose restart backend → 特定サービスだけ再起動
 
+# =============================================================================
+# services（サービス定義）
+# =============================================================================
+# 【servicesとは？】
+# アプリケーションを構成する各コンテナを定義するセクションです。
+# 各サービスは独立したコンテナとして実行されます。
+# ここでは6つのサービスを定義しています：
+#   1. frontend  - ユーザーが見るWebページ（React）
+#   2. backend   - APIサーバー（FastAPI/Python）
+#   3. gateway   - WebSocket通信サーバー（Go）
+#   4. postgres  - データベース（PostgreSQL）
+#   5. redis     - キャッシュ・メッセージキュー（Redis）
+#   6. ollama    - ローカルAIモデル（Ollama）
 services:
   # ---------------------------------------------------------------------------
   # Frontend - React + TypeScript (Nginx in production)
+  # フロントエンド - React + TypeScript（本番環境ではNginxで配信）
   # ---------------------------------------------------------------------------
+  # 【フロントエンドの役割】
+  # ユーザーがブラウザで操作するUI（ユーザーインターフェース）部分です。
+  # React（JavaScriptフレームワーク）で作られています。
+  # 開発時はViteの開発サーバー、本番時はNginxで静的ファイルを配信します。
   frontend:
+    # 【build - Dockerイメージのビルド設定】
+    # context: ビルドコンテキスト（Dockerfileがあるディレクトリ）
+    # dockerfile: 使用するDockerfileの名前
+    # ビルドコンテキストとは、Dockerがイメージ作成時にアクセスできるファイル群のことです。
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    # 【depends_on - サービスの起動順序と依存関係】
+    # このサービスが起動する前に、依存するサービスが「healthy（正常）」
+    # 状態になるまで待ちます。
+    # condition: service_healthy → ヘルスチェックが成功するまで待つ
+    # condition: service_started → コンテナが起動するまで待つ（ヘルスチェックなし）
+    #
+    # なぜ依存関係が必要？
+    # → フロントエンドがAPIを呼ぶとき、バックエンドが起動していないと
+    #   エラーになるため、起動順序を制御します。
     depends_on:
       backend:
         condition: service_healthy
       gateway:
         condition: service_healthy
+    # 【networks - 接続するネットワーク】
+    # フロントエンドは frontend-network にのみ接続します。
+    # これにより、フロントエンドから直接データベースにアクセスできなくなります（セキュリティ）。
+    # 詳細は下部の networks セクションを参照してください。
     networks:
       - frontend-network
+    # 【restart - 再起動ポリシー】
+    # unless-stopped: 手動で停止しない限り、クラッシュ時に自動再起動
+    # 他のオプション:
+    #   no          → 再起動しない（デフォルト）
+    #   always      → 常に再起動（Docker再起動時も）
+    #   on-failure  → エラー終了時のみ再起動
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # Backend - FastAPI (Python)
+  # バックエンド - FastAPI（Python）
   # ---------------------------------------------------------------------------
+  # 【バックエンドの役割】
+  # API（Application Programming Interface）サーバーです。
+  # フロントエンドからのリクエストを受け取り、データベースの読み書き、
+  # AI処理、認証（ログイン）などのビジネスロジックを実行します。
+  # FastAPIはPythonの高速Webフレームワークです。
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    # 【ports - ポートマッピング】
+    # 形式: "ホスト側ポート:コンテナ側ポート"
+    # ホスト（あなたのPC）のポート8000にアクセスすると、
+    # コンテナ内のポート8000に転送されます。
+    #
+    # ${BACKEND_PORT:-8000} の意味:
+    #   環境変数 BACKEND_PORT が設定されていればその値を使い、
+    #   設定されていなければデフォルト値 8000 を使います。
+    #   この :- はシェルのデフォルト値構文です。
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    # 【environment - 環境変数】
+    # コンテナ内で使える環境変数を設定します。
+    # アプリケーションの設定をコードの外（環境変数）で管理するのが
+    # 「12 Factor App」というベストプラクティスです。
+    # パスワードやシークレットキーをコードに直接書かないのがセキュリティの基本です。
     environment:
+      # ENVIRONMENT: アプリの実行環境（development/production）
+      # 環境によって動作を変える（デバッグログの出力など）ために使います。
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      # DATABASE_URL: データベース接続文字列
+      # 形式: ドライバー://ユーザー:パスワード@ホスト:ポート/データベース名
+      # postgresql+asyncpg: 非同期のPostgreSQLドライバー（高速な処理のため）
+      # @postgres: Docker Composeのサービス名でアクセスできます（DNSの代わり）
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB}
+      # REDIS_URL: Redisキャッシュサーバーへの接続文字列
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:${REDIS_PORT:-6379}/0
+      # OLLAMA_BASE_URL: ローカルAIモデル（Ollama）のAPIエンドポイント
       - OLLAMA_BASE_URL=http://ollama:${OLLAMA_PORT:-11434}
+      # OLLAMA_MODEL: 使用するLLM（大規模言語モデル）の名前
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3}
+      # OLLAMA_EMBEDDING_MODEL: テキストをベクトルに変換するモデル（RAG検索用）
       - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      # SECRET_KEY: アプリ全体で使う秘密鍵（セッション暗号化などに使用）
       - SECRET_KEY=${SECRET_KEY}
+      # JWT_ALGORITHM: JWT（JSON Web Token）の署名アルゴリズム
+      # RS256: RSA公開鍵暗号方式（秘密鍵で署名、公開鍵で検証）
       - JWT_ALGORITHM=${JWT_ALGORITHM:-RS256}
+      # JWT有効期限: アクセストークン=15分、リフレッシュトークン=7日
+      # 短い有効期限はセキュリティのため（盗まれても被害を最小化）
       - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-15}
       - JWT_REFRESH_TOKEN_EXPIRE_DAYS=${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      # JWTの鍵ファイルパス（コンテナ内のパス）
       - JWT_PRIVATE_KEY_PATH=/app/keys/private.pem
       - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
+      # 初回起動時に作成される管理者アカウント
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme123}
+      # CORS_ORIGINS: クロスオリジンリクエストを許可するURL
+      # ブラウザのセキュリティ機能で、異なるドメインからのAPIアクセスを制限します。
+      # フロントエンドのURL（localhost:3000, localhost:5173）を許可しています。
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      # RATE_LIMIT: 1分あたりのリクエスト数制限（DDoS攻撃対策）
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
+      # Gateway（Go）との内部通信設定（gRPCプロトコル）
       - GATEWAY_GRPC_HOST=gateway
       - GATEWAY_GRPC_PORT=${GATEWAY_GRPC_PORT:-50051}
+      # RAG（Retrieval-Augmented Generation）設定
+      # ドキュメントを小さなチャンクに分割してAIに渡す設定
+      # CHUNK_SIZE: 1チャンクの文字数（大きすぎると精度低下、小さすぎると文脈喪失）
+      # CHUNK_OVERLAP: チャンク間の重複文字数（文脈の連続性を保つため）
+      # TOP_K: 検索結果の上位何件をAIに渡すか
       - RAG_CHUNK_SIZE=${RAG_CHUNK_SIZE:-500}
       - RAG_CHUNK_OVERLAP=${RAG_CHUNK_OVERLAP:-100}
       - RAG_TOP_K=${RAG_TOP_K:-5}
+    # 【volumes - データの永続化とファイル共有】
+    # コンテナは停止すると内部のデータが消えます。
+    # volumes を使うことで、データをコンテナの外（ホスト）に保存できます。
+    #
+    # 2種類のボリューム:
+    # 1. バインドマウント（./keys:/app/keys:ro）
+    #    → ホストのディレクトリをコンテナにマウント
+    #    → :ro は「読み取り専用（read-only）」の意味
+    # 2. 名前付きボリューム（backend-uploads:/app/uploads）
+    #    → Docker が管理するボリューム（下部の volumes セクションで定義）
     volumes:
       - ./keys:/app/keys:ro
       - backend-uploads:/app/uploads
       - backend-data:/app/data
+    # 【depends_on - 依存サービス】
+    # バックエンドはデータベース（postgres）とキャッシュ（redis）に依存します。
+    # これらが正常に起動してからバックエンドを起動します。
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # 【healthcheck - ヘルスチェック（死活監視）】
+    # コンテナが正常に動作しているか定期的にチェックします。
+    # test: チェックコマンド（HTTPリクエストを送って応答を確認）
+    # interval: チェック間隔（10秒ごと）
+    # timeout: タイムアウト（5秒以内に応答がなければ失敗）
+    # retries: 何回失敗したら「異常」と判断するか（5回）
+    # start_period: 起動直後の猶予時間（30秒間はチェック失敗を無視）
+    #   → アプリの起動に時間がかかる場合に必要
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+    # 【networks - 接続ネットワーク】
+    # バックエンドは frontend-network と backend-network の両方に接続します。
+    # → フロントエンドからのリクエストを受け取り（frontend-network）、
+    #   データベースやRedisにもアクセスする（backend-network）ため。
     networks:
       - frontend-network
       - backend-network
@@ -75,20 +211,41 @@ services:
 
   # ---------------------------------------------------------------------------
   # Gateway - Go WebSocket Server
+  # ゲートウェイ - Go言語 WebSocketサーバー
   # ---------------------------------------------------------------------------
+  # 【ゲートウェイの役割】
+  # ロボットとブラウザ間のリアルタイム双方向通信を担当します。
+  # WebSocket: 一度接続すると、サーバーからもクライアントにデータを送れる通信プロトコル
+  # gRPC: サービス間の高速通信プロトコル（バックエンドとの連携に使用）
+  #
+  # なぜGo言語？
+  # → 高い並行処理性能（多数の同時接続を効率的に処理）
+  # → 低レイテンシ（ロボット操作にはリアルタイム性が重要）
   gateway:
     build:
       context: ./gateway
       dockerfile: Dockerfile
+    # 2つのポートを公開:
+    # 8080: WebSocket通信（ブラウザ↔ゲートウェイ）
+    # 50051: gRPC通信（バックエンド↔ゲートウェイ、内部通信）
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
       - "${GATEWAY_GRPC_PORT:-50051}:50051"
     environment:
       - GATEWAY_PORT=8080
       - GATEWAY_GRPC_PORT=50051
+      # ログレベル: debug（開発時は詳しく）、info（本番時は重要なものだけ）
       - GATEWAY_LOG_LEVEL=${GATEWAY_LOG_LEVEL:-debug}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:${REDIS_PORT:-6379}/0
+      # JWT公開鍵: トークンの検証に使用（秘密鍵は不要=検証のみ）
       - JWT_PUBLIC_KEY_PATH=/app/keys/public.pem
+      # 【ロボット安全パラメータ】
+      # ESTOP: 緊急停止ボタン（Emergency Stop）の有効/無効
+      # CMD_TIMEOUT: コマンドのタイムアウト（3秒応答がなければ停止）
+      # MAX_LINEAR_VEL: 最大直進速度（m/s）- 速すぎると危険
+      # MAX_ANGULAR_VEL: 最大回転速度（rad/s）
+      # OPERATION_LOCK_TIMEOUT: 操作ロックのタイムアウト（300秒=5分）
+      #   → 一人が操作中に他の人が操作できないようにするロック
       - GATEWAY_ESTOP_ENABLED=${GATEWAY_ESTOP_ENABLED:-true}
       - GATEWAY_CMD_TIMEOUT_SEC=${GATEWAY_CMD_TIMEOUT_SEC:-3}
       - GATEWAY_MAX_LINEAR_VEL=${GATEWAY_MAX_LINEAR_VEL:-1.0}
@@ -99,12 +256,17 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    # ゲートウェイのヘルスチェック
+    # wget でHTTPリクエストを送り、/health エンドポイントの応答を確認
+    # --spider: ファイルをダウンロードせずにアクセス確認のみ行う
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    # ゲートウェイも両方のネットワークに接続
+    # → フロントエンドからWebSocket接続を受け、Redisにもアクセスするため
     networks:
       - frontend-network
       - backend-network
@@ -112,31 +274,85 @@ services:
 
   # ---------------------------------------------------------------------------
   # PostgreSQL + TimescaleDB + pgvector
+  # PostgreSQL + TimescaleDB（時系列データ） + pgvector（ベクトル検索）
   # ---------------------------------------------------------------------------
+  # 【PostgreSQLの役割】
+  # リレーショナルデータベース（RDB）- データを表形式で保存・管理します。
+  # ユーザー情報、ロボット設定、操作履歴などを保存します。
+  #
+  # 【TimescaleDB拡張】
+  # 時系列データ（センサーデータなど）を効率的に保存・検索するための拡張機能。
+  # 通常のPostgreSQLより時系列クエリが100倍以上高速になることがあります。
+  #
+  # 【pgvector拡張】
+  # ベクトル（数値の配列）を保存・検索するための拡張機能。
+  # AIの埋め込みベクトル（embedding）を使った類似検索に使用します。
   postgres:
+    # 【image - 既存のDockerイメージを使用】
+    # build の代わりに image を使うと、Docker Hub などから
+    # 既にビルドされたイメージをダウンロードして使います。
+    # timescale/timescaledb: TimescaleDBが組み込まれたPostgreSQLイメージ
+    # latest-pg16: PostgreSQL 16の最新版
     image: timescale/timescaledb:latest-pg16
     environment:
+      # PostgreSQLの初期設定（初回起動時にこの設定でDBが作成される）
+      # POSTGRES_USER: データベースユーザー名
+      # POSTGRES_PASSWORD: パスワード（本番では必ず強力なものに変更！）
+      # POSTGRES_DB: データベース名
       - POSTGRES_USER=${POSTGRES_USER:-robot_app}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-robot_app_password_change_me}
       - POSTGRES_DB=${POSTGRES_DB:-robot_ai_db}
     volumes:
+      # postgres-data: データベースファイルの永続化
+      # → コンテナを削除してもデータが残ります
       - postgres-data:/var/lib/postgresql/data
+      # 初期化SQLスクリプト: コンテナ初回起動時に自動実行されます
+      # /docker-entrypoint-initdb.d/ に置いたSQLファイルは、
+      # データベース作成後に自動的に実行される仕組み（PostgreSQLの機能）
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    # PostgreSQLのヘルスチェック
+    # pg_isready: PostgreSQLが接続を受け付けるかチェックする専用コマンド
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-robot_app} -d ${POSTGRES_DB:-robot_ai_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
       start_period: 10s
+    # データベースは backend-network のみ（フロントエンドから直接アクセス不可）
+    # → セキュリティのため、データベースはバックエンド経由でのみアクセス
     networks:
       - backend-network
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # Redis (Streams + Cache)
+  # Redis（ストリーム + キャッシュ）
   # ---------------------------------------------------------------------------
+  # 【Redisの役割】
+  # インメモリ（メモリ上で動作する）データストアです。
+  # 1. キャッシュ: よく使うデータをメモリに保存して高速アクセス
+  # 2. セッション管理: ユーザーのログイン状態を管理
+  # 3. メッセージキュー（Streams）: サービス間の非同期メッセージ通信
+  # 4. Pub/Sub: リアルタイム通知
+  #
+  # なぜRedis？
+  # → メモリ上で動作するため、データベースより100倍以上高速
+  # → ロボット操作のようなリアルタイム処理に適している
   redis:
     image: redis:7-alpine
+    # 【command - 起動コマンドのカスタマイズ】
+    # デフォルトの起動コマンドを上書きします。
+    # > は YAML の「複数行文字列」記法（改行がスペースに変換される）
+    #
+    # 【Redisコマンドオプションの詳細】
+    # --requirepass: パスワード認証を有効化（セキュリティ）
+    # --appendonly yes: AOF（Append Only File）永続化を有効化
+    #   → 書き込み操作をファイルに記録し、再起動時にデータを復元
+    # --appendfsync everysec: 1秒ごとにディスクに書き込み
+    #   → always（毎回）だと遅い、no（OS任せ）だとデータ消失リスク
+    # --maxmemory 256mb: メモリ使用量の上限
+    # --maxmemory-policy allkeys-lru: メモリが上限に達した場合の挙動
+    #   → LRU（Least Recently Used）= 最も長く使われていないキーを削除
     command: >
       redis-server
       --requirepass ${REDIS_PASSWORD:-redis_password_change_me}
@@ -146,6 +362,7 @@ services:
       --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
+    # Redisのヘルスチェック: ping コマンドで応答を確認
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_password_change_me}", "ping"]
       interval: 5s
@@ -157,11 +374,28 @@ services:
 
   # ---------------------------------------------------------------------------
   # Ollama (Local LLM)
+  # Ollama（ローカルLLM = 大規模言語モデル）
   # ---------------------------------------------------------------------------
+  # 【Ollamaの役割】
+  # ローカル環境でLLM（ChatGPTのようなAIモデル）を実行するサービスです。
+  # クラウドAPIを使わず、自分のマシン上でAI推論を行えます。
+  #
+  # メリット:
+  # - データが外部に送信されない（プライバシー保護）
+  # - API利用料がかからない
+  # - インターネット接続不要で動作
+  #
+  # デメリット:
+  # - GPUがないと処理が遅い
+  # - 大きなモデルはメモリを大量に消費する
   ollama:
     image: ollama/ollama:latest
+    # モデルデータの永続化（数GBのモデルファイルを保存）
+    # → コンテナ再起動時にモデルを再ダウンロードしなくて済む
     volumes:
       - ollama-data:/root/.ollama
+    # Ollamaのヘルスチェック: /api/tags エンドポイントにアクセス
+    # start_period: 30s → モデルの読み込みに時間がかかるため猶予を長めに設定
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
       interval: 10s
@@ -173,20 +407,70 @@ services:
     restart: unless-stopped
 
 # =============================================================================
-# Networks
+# Networks（ネットワーク定義）
 # =============================================================================
+# 【Dockerネットワークとは？】
+# コンテナ同士が通信するための仮想ネットワークです。
+# デフォルトでは全コンテナが同じネットワークに接続されますが、
+# セキュリティのためにネットワークを分離します。
+#
+# 【なぜネットワークを分けるの？】
+# セキュリティの原則「最小権限の原則」に基づいています。
+# 必要のない通信経路を遮断することで、攻撃を受けた場合の被害を最小化します。
+#
+# 【ネットワーク構成図】
+#
+#   ブラウザ
+#     │
+#     ▼
+#   ┌─────────── frontend-network ───────────┐
+#   │  frontend ─── backend ─── gateway      │
+#   └─────────────────┼─────────────┼────────┘
+#                     │             │
+#   ┌─────────── backend-network ────────────┐
+#   │  backend ─── gateway ─── postgres      │
+#   │              redis ─── ollama          │
+#   └────────────────────────────────────────┘
+#
+# ポイント:
+# - frontend は backend-network にアクセスできない
+# - postgres, redis は frontend-network にアクセスできない
+# - backend と gateway は両方のネットワークに接続（橋渡し役）
 networks:
+  # フロントエンドネットワーク: ブラウザに近い側のサービスが接続
   frontend-network:
+    # bridge: デフォルトのネットワークドライバー
+    # 同じホスト上のコンテナ同士を接続する最も一般的な方式
     driver: bridge
+  # バックエンドネットワーク: データベースやキャッシュに近い側のサービスが接続
   backend-network:
     driver: bridge
 
 # =============================================================================
-# Volumes
+# Volumes（ボリューム定義）
 # =============================================================================
+# 【名前付きボリュームとは？】
+# Dockerが管理するデータ保存領域です。
+# コンテナを削除しても、ボリュームのデータは保持されます。
+#
+# 【なぜボリュームが必要？】
+# Dockerコンテナは「使い捨て」が基本思想です。
+# コンテナを削除・再作成しても、重要なデータ（DB、アップロードファイルなど）は
+# ボリュームに保存されているため、失われません。
+#
+# 【ボリュームの管理コマンド】
+#   docker volume ls                → ボリューム一覧
+#   docker volume inspect <名前>    → ボリュームの詳細
+#   docker volume rm <名前>         → ボリュームの削除（データも消える！）
+#   docker compose down -v          → コンテナとボリュームを全て削除
 volumes:
+  # PostgreSQLのデータファイル（テーブル、インデックスなど）
   postgres-data:
+  # Redisの永続化データ（AOFファイル）
   redis-data:
+  # OllamaのAIモデルファイル（数GB〜数十GB）
   ollama-data:
+  # ユーザーがアップロードしたファイル（画像、ドキュメントなど）
   backend-uploads:
+  # アプリケーションデータ（ログ、一時ファイルなど）
   backend-data:

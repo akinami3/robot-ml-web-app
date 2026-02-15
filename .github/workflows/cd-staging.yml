@@ -1,49 +1,162 @@
+# =============================================================================
+# CD（継続的デリバリー）- ステージング環境へのデプロイ
+# =============================================================================
+#
+# 【CD（Continuous Delivery/Deployment）とは？】
+# CIでテストに通ったコードを、自動的にサーバーにデプロイ（配置・公開）する仕組みです。
+# - Continuous Delivery: 本番デプロイ前に手動承認が必要
+# - Continuous Deployment: 全自動で本番までデプロイ
+#
+# 【ステージング環境とは？】
+# 本番環境とほぼ同じ構成のテスト環境です。
+# 本番にデプロイする前に、ステージング環境で最終確認を行います。
+#
+# 【デプロイの流れ（全体像）】
+#
+#   develop ブランチにpush
+#         │
+#         ▼
+#   ┌──────────────────────────┐
+#   │  CI（テスト・ビルド）     │  ← ci.yml で実行
+#   └────────────┬─────────────┘
+#                │ 成功
+#                ▼
+#   ┌──────────────────────────┐
+#   │  Dockerイメージをビルド    │
+#   │  コンテナレジストリにpush  │  ← このファイル
+#   └────────────┬─────────────┘
+#                │
+#                ▼
+#   ┌──────────────────────────┐
+#   │  ステージング環境にデプロイ │
+#   └──────────────────────────┘
+
+# ワークフロー名
 name: Deploy Staging
 
+# =============================================================================
+# トリガー設定
+# =============================================================================
+# develop ブランチにpushされたときのみ実行
+# → 機能ブランチ（feature/*）からdevelopにマージされたタイミングで
+#   ステージング環境が自動更新されます。
 on:
   push:
     branches: [develop]
 
+# =============================================================================
+# 環境変数
+# =============================================================================
 env:
+  # 【REGISTRY - コンテナレジストリ】
+  # ghcr.io = GitHub Container Registry（GitHubが提供するDockerイメージの保管場所）
+  # Docker Hub の代わりに、GitHubリポジトリと連携した管理ができます。
+  # 無料枠: パブリックリポジトリは無制限、プライベートは500MB/月
   REGISTRY: ghcr.io
+  # 【IMAGE_PREFIX - イメージ名のプレフィックス】
+  # github.repository = "ユーザー名/リポジトリ名"
+  # 最終的なイメージ名: ghcr.io/ユーザー名/リポジトリ名/サービス名:タグ
   IMAGE_PREFIX: ${{ github.repository }}
 
+# =============================================================================
+# ジョブ定義
+# =============================================================================
 jobs:
+  # ---------------------------------------------------------------------------
+  # ジョブ1: Dockerイメージのビルド＆プッシュ
+  # ---------------------------------------------------------------------------
   build-and-push:
     name: Build & Push Images
     runs-on: ubuntu-latest
+    # 【permissions - GITHUB_TOKENの権限設定】
+    # GITHUB_TOKEN: GitHubが自動的に発行する認証トークン
+    # ワークフロー内でGitHubのAPIやレジストリにアクセスするために使います。
+    #
+    # contents: read → リポジトリの内容を読み取る権限
+    # packages: write → GitHub Packages（コンテナレジストリ）への書き込み権限
+    #
+    # 【最小権限の原則】
+    # 必要な権限だけを明示的に指定します。
+    # 不要な権限を与えると、セキュリティリスクが増加します。
     permissions:
       contents: read
       packages: write
+    # 【strategy.matrix - マトリックス戦略】
+    # 同じステップを複数のパラメータで並列実行する仕組みです。
+    # ここでは3つのサービス（gateway, backend, frontend）に対して
+    # 同じビルド手順を並列実行します。
+    #
+    # マトリックスなしだと、3つのサービスのビルドを
+    # 個別に書く必要があり、コードが3倍になります。
+    # → DRY原則（繰り返しを避ける）の実践！
     strategy:
       matrix:
         service: [gateway, backend, frontend]
     steps:
       - uses: actions/checkout@v4
 
+      # 【コンテナレジストリへのログイン】
+      # docker login と同等の処理を安全に行うアクションです。
+      # secrets.GITHUB_TOKEN: GitHubが自動的に提供するトークン
+      # → 手動でトークンを作成・管理する必要がありません。
       - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
+          # github.actor: ワークフローを実行したユーザー名
           username: ${{ github.actor }}
+          # secrets.GITHUB_TOKEN: 自動発行される認証トークン
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 【Dockerイメージのビルド＆プッシュ】
+      # docker/build-push-action: Docker公式のビルド・プッシュアクション
+      # BuildKitを使った効率的なビルドが行われます。
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
+          # context: ビルドコンテキスト（${{ matrix.service }} で動的に変化）
+          # → gateway, backend, frontend のそれぞれのディレクトリ
           context: ./${{ matrix.service }}
+          # push: true → ビルド後にレジストリにプッシュする
           push: true
+          # 【tags - イメージタグ（バージョン識別子）】
+          # 2つのタグを付けます:
+          # 1. :staging → 常にステージング最新版を指す（上書きされる）
+          # 2. :コミットSHA → そのコミット固有のタグ（変更されない）
+          #
+          # なぜ2つのタグ？
+          # - :staging → 「今のステージング版」を簡単に参照
+          # - :SHA → 問題があった場合に特定のバージョンに戻せる（ロールバック）
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:staging
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
 
+  # ---------------------------------------------------------------------------
+  # ジョブ2: ステージング環境へのデプロイ
+  # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to Staging
     runs-on: ubuntu-latest
+    # build-and-push ジョブが成功した後に実行
     needs: build-and-push
+    # 【environment - デプロイ環境の指定】
+    # GitHubの「Environments」機能と連携します。
+    # Environment を使うと:
+    # - 環境固有のシークレット（秘密情報）を設定できる
+    # - デプロイの承認ルールを設定できる（例: 特定のレビュアーの承認が必要）
+    # - デプロイ履歴を管理できる
+    #
+    # 設定場所: リポジトリ → Settings → Environments → New environment
     environment: staging
     steps:
       - uses: actions/checkout@v4
+      # 【デプロイコマンド（プレースホルダー）】
+      # 実際のデプロイコマンドはインフラ構成によって異なります。
+      # 例:
+      # - SSH でサーバーに接続して docker compose pull && docker compose up -d
+      # - kubectl apply でKubernetesにデプロイ
+      # - AWS ECS のタスク定義を更新
+      # - Terraform / Ansible でインフラを更新
       - name: Deploy (placeholder)
         run: |
           echo "Deploy staging with commit ${{ github.sha }}"

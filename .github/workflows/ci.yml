@@ -1,35 +1,130 @@
+# =============================================================================
+# CI（継続的インテグレーション）ワークフロー
+# =============================================================================
+#
+# 【CI（Continuous Integration）とは？】
+# コードの変更を頻繁にメインブランチに統合し、その都度自動テストを実行する開発手法です。
+# バグの早期発見、品質の維持、チーム開発の効率化が目的です。
+#
+# 【GitHub Actionsとは？】
+# GitHubに組み込まれたCI/CDサービスです。
+# コードをpushしたりPull Requestを作成すると、自動的にテストやビルドが実行されます。
+# 無料枠があり、個人プロジェクトでも気軽に使えます。
+#
+# 【このワークフローの全体像】
+#
+#   コードをpush/PR作成
+#         │
+#         ▼
+#   ┌─────────────────────────────────────────┐
+#   │  並列実行（3つのサービスを同時にチェック）  │
+#   │                                         │
+#   │  Gateway(Go)    Backend(Python)  Frontend(React)
+#   │  ├─ lint         ├─ lint         ├─ lint
+#   │  ├─ test         ├─ test         ├─ test
+#   │  └─ build        └─ build        └─ build
+#   └─────────────┬───────────────────────────┘
+#                 │
+#                 ▼
+#         docker-compose-check
+#         （Compose設定の検証）
+
+# ワークフローの名前（GitHub上で表示される）
 name: CI
 
+# =============================================================================
+# on（トリガー設定）- いつワークフローを実行するか
+# =============================================================================
+# 【トリガーとは？】
+# どのイベントが起きたときにワークフローを実行するかを定義します。
+#
+# 【一般的なトリガーの種類】
+# push: コードがpushされたとき
+# pull_request: PRが作成・更新されたとき
+# schedule: 定期実行（cron形式）
+# workflow_dispatch: 手動実行
+# release: リリースが作成されたとき
 on:
+  # main または develop ブランチにpushされたとき
   push:
     branches: [main, develop]
+  # main ブランチへのPull Requestが作成・更新されたとき
   pull_request:
     branches: [main]
 
+# =============================================================================
+# env（環境変数）- ワークフロー全体で使用する変数
+# =============================================================================
+# 【なぜ環境変数で定義するの？】
+# バージョンを一箇所で管理できるため、更新時の変更箇所が1つで済みます。
+# DRY原則（Don't Repeat Yourself）の実践です。
 env:
   GO_VERSION: "1.22"
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "20"
 
+# =============================================================================
+# jobs（ジョブ定義）- 実行するタスクの一覧
+# =============================================================================
+# 【jobsとは？】
+# ワークフロー内で実行される独立したタスクの集まりです。
+# デフォルトでは全てのジョブが並列実行されます。
+# needs キーワードで依存関係を指定すると、順次実行になります。
 jobs:
+  # ===========================================================================
   # --- Gateway (Go) ---
+  # ゲートウェイ（Go言語）のジョブ
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # ゲートウェイ - Lint（静的解析）
+  # ---------------------------------------------------------------------------
+  # 【Lintとは？】
+  # コードを実行せずに、潜在的なバグやコーディング規約違反を検出するツールです。
+  # 例: 未使用の変数、危険な型変換、スタイル違反など
   gateway-lint:
+    # name: GitHub UI上で表示されるジョブ名
     name: Gateway Lint
+    # 【runs-on - 実行環境】
+    # ジョブが実行されるマシン（ランナー）を指定します。
+    # ubuntu-latest: 最新のUbuntu Linux（GitHub提供の無料ランナー）
+    # 他のオプション: windows-latest, macos-latest
     runs-on: ubuntu-latest
+    # 【defaults.run.working-directory - デフォルトの作業ディレクトリ】
+    # このジョブ内の全ての run ステップが gateway/ ディレクトリで実行されます。
+    # 毎回 cd gateway する必要がなくなります。
     defaults:
       run:
         working-directory: gateway
+    # 【steps - ジョブ内の実行ステップ】
+    # ステップは上から順番に実行されます。
+    # 1つのステップが失敗すると、以降のステップはスキップされます。
     steps:
+      # 【actions/checkout - リポジトリのチェックアウト】
+      # GitHubリポジトリのソースコードをランナーにダウンロードします。
+      # ほぼ全てのワークフローで最初に実行する必須ステップです。
+      # @v4: アクションのバージョン（メジャーバージョン指定が推奨）
       - uses: actions/checkout@v4
+      # 【actions/setup-go - Go環境のセットアップ】
+      # 指定バージョンのGoをインストールし、パスを設定します。
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+      # 【golangci-lint - Go用のLintツール】
+      # 複数のLintツールを統合した強力なGo用静的解析ツールです。
+      # golangci-lint-action: 公式のGitHub Actionsアクション
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v4
         with:
           working-directory: gateway
           version: latest
 
+  # ---------------------------------------------------------------------------
+  # ゲートウェイ - テスト
+  # ---------------------------------------------------------------------------
+  # 【ユニットテストの重要性】
+  # コードの各部品（関数、メソッド）が正しく動作するか確認します。
+  # テストがあれば、コードを変更しても既存の機能が壊れていないか確認できます。
   gateway-test:
     name: Gateway Test
     runs-on: ubuntu-latest
@@ -41,23 +136,53 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+      # 【go test コマンドの各オプション】
+      # -v: 詳細な出力（各テストの結果を1行ずつ表示）
+      # -race: レースコンディション検出器を有効化
+      #   → 並行処理でのデータ競合バグを検出（Go特有の重要な機能）
+      # -coverprofile=coverage.out: テストカバレッジ（網羅率）をファイルに出力
+      #   → コードの何%がテストされているかを測定
+      # ./...: 全てのサブパッケージを対象にテスト実行
       - run: go test -v -race -coverprofile=coverage.out ./...
+      # 【actions/upload-artifact - 成果物のアップロード】
+      # テスト結果やカバレッジレポートをGitHubに保存します。
+      # → 後からダウンロードして確認できます。
+      # → 他のジョブからも参照できます。
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
+          # 成果物の名前（後でダウンロードする際に使用）
           name: gateway-coverage
+          # アップロードするファイルのパス
           path: gateway/coverage.out
 
+  # ---------------------------------------------------------------------------
+  # ゲートウェイ - Dockerイメージビルド
+  # ---------------------------------------------------------------------------
+  # 【needs - ジョブの依存関係】
+  # needs で指定したジョブが全て成功した後に実行されます。
+  # lint と test が両方成功しないとビルドしません。
+  # → 品質チェックに通らないコードのイメージを作らないため。
   gateway-build:
     name: Gateway Build
     runs-on: ubuntu-latest
+    # lint と test の両方が成功した後に実行
     needs: [gateway-lint, gateway-test]
     steps:
       - uses: actions/checkout@v4
+      # Dockerイメージをビルド（pushはしない = CIでのビルド確認のみ）
+      # タグ名に :ci を付けてCI用であることを明示
       - name: Build Docker image
         run: docker build -t robot-ai-gateway:ci ./gateway
 
+  # ===========================================================================
   # --- Backend (Python) ---
+  # バックエンド（Python）のジョブ
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # バックエンド - Lint（静的解析）
+  # ---------------------------------------------------------------------------
   backend-lint:
     name: Backend Lint
     runs-on: ubuntu-latest
@@ -69,10 +194,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      # 【ruff - Python用の高速Lintツール】
+      # Rust で書かれた超高速な Python Lint/フォーマッター
+      # flake8, isort, pyflakes などの機能を1つに統合
+      # mypy: 型チェックツール（Pythonに型注釈がある場合に使用）
       - run: pip install ruff mypy
+      # ruff check: コードの品質チェック（バグ、スタイル違反の検出）
       - run: ruff check .
+      # ruff format --check: コードフォーマットの確認（修正はしない）
+      # → フォーマットが統一されていないとエラーになる
       - run: ruff format --check .
 
+  # ---------------------------------------------------------------------------
+  # バックエンド - テスト
+  # ---------------------------------------------------------------------------
   backend-test:
     name: Backend Test
     runs-on: ubuntu-latest
@@ -84,7 +219,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      # 【pip install -e ".[dev]" の意味】
+      # -e: 開発モードでインストール（editable install）
+      #   → ソースコードの変更が即座に反映される
+      # ".[dev]": pyproject.toml の [project.optional-dependencies] dev グループを
+      #           含めてインストール（pytest, coverage などのテストツール）
       - run: pip install -e ".[dev]"
+      # 【pytest のオプション】
+      # -v: 詳細な出力
+      # --tb=short: エラー時のトレースバックを短く表示
+      # --cov=app: app ディレクトリのカバレッジを測定
+      # --cov-report=xml: カバレッジレポートをXML形式で出力
+      #   → XML形式はCoveralls, Codecov などのサービスで利用可能
       - run: pytest -v --tb=short --cov=app --cov-report=xml
       - name: Upload coverage
         uses: actions/upload-artifact@v4
@@ -92,6 +238,9 @@ jobs:
           name: backend-coverage
           path: backend/coverage.xml
 
+  # ---------------------------------------------------------------------------
+  # バックエンド - Dockerイメージビルド
+  # ---------------------------------------------------------------------------
   backend-build:
     name: Backend Build
     runs-on: ubuntu-latest
@@ -101,7 +250,14 @@ jobs:
       - name: Build Docker image
         run: docker build -t robot-ai-backend:ci ./backend
 
+  # ===========================================================================
   # --- Frontend (React) ---
+  # フロントエンド（React）のジョブ
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # フロントエンド - Lint（静的解析）
+  # ---------------------------------------------------------------------------
   frontend-lint:
     name: Frontend Lint
     runs-on: ubuntu-latest
@@ -113,12 +269,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          # 【cache - 依存関係のキャッシュ】
+          # npm パッケージをキャッシュすることで、次回のインストールが高速化されます。
+          # cache-dependency-path: キャッシュのキーに使うファイル
+          #   → package-lock.json が変わったらキャッシュを再作成
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      # 【npm ci - クリーンインストール】
+      # npm install との違い:
+      # - package-lock.json の内容を厳密に再現（CI環境に最適）
+      # - node_modules を削除してから再インストール
+      # - package.json と package-lock.json の整合性チェック
       - run: npm ci
+      # 【ESLint - JavaScript/TypeScript用Lintツール】
+      # --max-warnings 0: 警告（warning）が1つでもあればエラー扱い
+      # → CIでは警告も許容しない（品質を厳しく管理）
       - run: npx eslint src/ --max-warnings 0
+      # 【tsc --noEmit - TypeScriptの型チェックのみ】
+      # --noEmit: JavaScriptファイルを出力せず、型チェックだけ行う
+      # → 型エラーがあればCIが失敗する
       - run: npx tsc --noEmit
 
+  # ---------------------------------------------------------------------------
+  # フロントエンド - テスト
+  # ---------------------------------------------------------------------------
   frontend-test:
     name: Frontend Test
     runs-on: ubuntu-latest
@@ -133,8 +307,14 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # 【vitest - Vite用テストフレームワーク】
+      # run: ウォッチモードではなく一度だけ実行（CI向け）
+      # --coverage: テストカバレッジを測定
       - run: npx vitest run --coverage
 
+  # ---------------------------------------------------------------------------
+  # フロントエンド - Dockerイメージビルド
+  # ---------------------------------------------------------------------------
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
@@ -144,13 +324,32 @@ jobs:
       - name: Build Docker image
         run: docker build -t robot-ai-frontend:ci ./frontend
 
-  # --- Integration ---
+  # ===========================================================================
+  # --- Integration（統合チェック）---
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Docker Compose設定ファイルの検証
+  # ---------------------------------------------------------------------------
+  # 【なぜCompose設定を検証するの？】
+  # YAMLの構文エラーや設定ミスを早期に検出するためです。
+  # 本番デプロイ時に設定エラーで起動しない、という事態を防ぎます。
   docker-compose-check:
     name: Docker Compose Validation
     runs-on: ubuntu-latest
+    # 全サービスのビルドが成功した後に実行
+    # → 個別のビルドが成功してからCompose全体を検証する
     needs: [gateway-build, backend-build, frontend-build]
     steps:
       - uses: actions/checkout@v4
+      # 【docker compose config -q の意味】
+      # config: Compose設定ファイルを解析して検証
+      # -q: quiet モード（エラーがなければ何も出力しない）
+      #
+      # 3つの組み合わせを全て検証:
+      # 1. ベースのみ
+      # 2. ベース + 開発環境
+      # 3. ベース + 本番環境
       - name: Validate compose files
         run: |
           docker compose config -q
