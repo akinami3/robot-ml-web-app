@@ -28,6 +28,8 @@
 └──────────────┘
 ```
 
+[](./docs/system-architecture.drawio.svg)
+
 ## 技術スタック
 
 | 領域 | 技術 |
