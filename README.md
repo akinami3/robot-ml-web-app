@@ -28,7 +28,7 @@
 └──────────────┘
 ```
 
-[](./docs/system-architecture.drawio.svg)
+![](./docs/system-architecture.drawio.svg)
 
 ## 技術スタック
 
