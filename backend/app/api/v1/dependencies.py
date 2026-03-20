@@ -1,23 +1,24 @@
 # =============================================================================
-# Step 8: 依存性注入（DI）— 認証対応版
+# Step 12: 依存性注入（DI）— RAG対応版
 # =============================================================================
 #
-# 【Step 7 からの変更点】
-# Step 7: get_robot_repository のみ
-# Step 8: + get_user_repository + get_current_user + require_role
+# 【Step 8 からの変更点（Step 12）】
+# Step 8: get_robot_repository + get_user_repository + get_current_user
+# Step 12: + get_rag_repository + get_audit_service + Annotated エイリアス
 #
-# 【DI チェーンの全体像】
+# 【Annotated 型エイリアス（Step 12 新規）】
+# Python 3.9+ の Annotated 型と FastAPI の Depends を組み合わせると、
+# エンドポイントの引数定義がシンプルになる:
 #
-#   get_session()           ← DB セッションを取得
-#       ↓
-#   get_robot_repository()  ← ロボットリポジトリを生成
-#   get_user_repository()   ← ユーザーリポジトリを生成
-#       ↓
-#   get_current_user()      ← JWT からユーザーを取得（認証）
-#       ↓
-#   require_role("admin")   ← ロールを検証（認可）
-#       ↓
-#   エンドポイント関数      ← ビジネスロジック
+#   # Before（冗長）:
+#   async def endpoint(repo: RAGRepository = Depends(get_rag_repository)):
+#
+#   # After（Annotated エイリアス）:
+#   RagRepo = Annotated[RAGRepository, Depends(get_rag_repository)]
+#   async def endpoint(repo: RagRepo):
+#
+# 💡 Annotated[T, metadata] は「T 型に追加情報（metadata）を付ける」構文。
+# FastAPI はこの metadata に含まれる Depends() を自動的に解釈する。
 #
 # =============================================================================
 
@@ -26,6 +27,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Annotated
 
 from app.infrastructure.database.connection import get_session
 from app.infrastructure.database.repositories.robot_repo import (
@@ -34,8 +36,17 @@ from app.infrastructure.database.repositories.robot_repo import (
 from app.infrastructure.database.repositories.user_repo import (
     SQLAlchemyUserRepository,
 )
+from app.infrastructure.database.repositories.rag_repo import (
+    SQLAlchemyRAGRepository,
+)
+from app.infrastructure.database.repositories.audit_repo import (
+    SQLAlchemyAuditRepository,
+)
 from app.domain.repositories.robot_repo import RobotRepository
 from app.domain.repositories.user_repo import UserRepository
+from app.domain.repositories.rag_repository import RAGRepository
+from app.domain.repositories.audit_repository import AuditRepository
+from app.domain.services.audit_service import AuditService
 from app.domain.entities.user import User
 from app.core.security import decode_token
 
@@ -185,3 +196,65 @@ def require_role(*allowed_roles: str):
         return current_user
 
     return role_checker
+
+
+# =============================================================================
+# RAG リポジトリ DI（Step 12 新規）
+# =============================================================================
+#
+# 【RAGRepository の責務】
+# - ドキュメント（RAGDocument）の CRUD
+# - チャンク（DocumentChunk）の保存
+# - ベクトル類似度検索（pgvector のコサイン距離を使用）
+#
+
+async def get_rag_repository(
+    session: AsyncSession = Depends(get_session),
+) -> RAGRepository:
+    """RAG リポジトリを注入する"""
+    return SQLAlchemyRAGRepository(session)
+
+
+# =============================================================================
+# 監査（Audit）サービス DI（Step 12 新規）
+# =============================================================================
+#
+# 【AuditService の役割】
+# ユーザーの操作を記録する（誰が、いつ、何をしたか）
+# RAG では以下のアクションを記録:
+#   - DOCUMENT_UPLOAD: ドキュメントのアップロード
+#   - DOCUMENT_DELETE: ドキュメントの削除
+#   - RAG_QUERY: 質問の実行
+#
+
+async def get_audit_service(
+    session: AsyncSession = Depends(get_session),
+) -> AuditService:
+    """監査サービスを注入する"""
+    repo = SQLAlchemyAuditRepository(session)
+    return AuditService(audit_repo=repo)
+
+
+# =============================================================================
+# Annotated 型エイリアス（Step 12 新規）
+# =============================================================================
+#
+# 💡 これらのエイリアスを使うと、エンドポイント定義が簡潔になる:
+#
+#   # エイリアスなし:
+#   async def query(repo: RAGRepository = Depends(get_rag_repository)):
+#
+#   # エイリアスあり:
+#   async def query(repo: RagRepo):
+#
+# 型チェッカー（mypy, pyright）も正しく解釈してくれる。
+#
+
+RagRepo = Annotated[RAGRepository, Depends(get_rag_repository)]
+"""RAGRepository の Annotated エイリアス"""
+
+AuditSvc = Annotated[AuditService, Depends(get_audit_service)]
+"""AuditService の Annotated エイリアス"""
+
+CurrentUser = Annotated[User, Depends(get_current_user)]
+"""認証済みユーザーの Annotated エイリアス"""

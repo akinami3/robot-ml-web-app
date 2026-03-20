@@ -240,9 +240,63 @@ export interface NavigationGoal {
 
 // ─── 今後のステップで追加される型 ─────────────────────────────────────
 //
-// Step 12 以降で以下の型定義が追加されます:
-//   - RAGDocument / RAGQueryResult     → Step 12: RAG Chat
+// Step 13 以降で以下の型定義が追加されます:
 //   - AuditLog（監査ログ）             → Step 13: Production
+
+// ─── RAG（検索拡張生成）関連の型（Step 12 新規） ────────────────────
+
+/**
+ * RAGDocument - アップロードされたドキュメントを表すインターフェース
+ *
+ * 💡 RAG（Retrieval-Augmented Generation）とは？
+ * - ドキュメントをアップロードして AI の知識ベースに追加する仕組み
+ * - PDF, TXT, Markdown ファイルに対応
+ * - アップロード時にテキストをチャンク（断片）に分割し、ベクトル化して保存
+ *
+ * 【チャンク（chunk）とは？】
+ * ドキュメントを LLM が扱いやすいサイズ（500文字程度）に分割したもの。
+ * chunk_count は分割数を示す — ドキュメントが長いほどチャンク数が多い。
+ */
+export interface RAGDocument {
+  id: string;                   // ドキュメントの一意なID
+  title: string;                // ドキュメントタイトル（ファイル名などから自動設定）
+  source: string;               // ソース情報（ファイル名, URL など）
+  file_type: string;            // ファイル形式（"pdf", "txt", "md"）
+  file_size: number;            // ファイルサイズ（バイト）
+  chunk_count: number;          // 分割されたチャンク数
+  created_at: string;           // アップロード日時
+}
+
+/**
+ * RAGSource - 回答の参照元ドキュメントチャンク
+ *
+ * LLM が回答を生成する際に参照したドキュメントの断片。
+ * ユーザーに「この回答は○○のドキュメントに基づいています」と示すために使う。
+ * これが RAG の大きなメリット — 回答の出典が明確で検証可能。
+ */
+export interface RAGSource {
+  document_title: string;       // 参照元ドキュメントのタイトル
+  chunk_text: string;           // 参照されたチャンクのテキスト
+  similarity: number;           // 類似度スコア（0.0 〜 1.0、高いほど関連性が高い）
+}
+
+/**
+ * RAGQueryResult - RAG 質問の回答結果
+ *
+ * 💡 各フィールドの意味:
+ * - answer: LLM が生成した回答テキスト
+ * - sources: 回答の根拠となったドキュメントチャンクのリスト
+ * - context_used: 回答生成に使用したチャンク数
+ *
+ * 【SSE ストリーミングの場合】
+ * answer は SSE で1トークンずつ届くため、この型はストリーミング完了後の
+ * 最終結果を表す。ストリーミング中は RAGChatPage.tsx 内で段階的に構築する。
+ */
+export interface RAGQueryResult {
+  answer: string;               // LLM が生成した回答
+  sources: RAGSource[];         // 参照したドキュメントチャンク
+  context_used: number;         // 使用したチャンク数
+}
 
 // ─── Recording Session（記録セッション）関連の型（Step 11 新規） ──────────
 

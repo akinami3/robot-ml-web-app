@@ -1,15 +1,19 @@
 # =============================================================================
-# Step 8: 認証スキーマ — リクエスト/レスポンスの型定義
+# Step 12: スキーマ定義（RAG対応版）
 # =============================================================================
 #
-# 【Step 7 からの変更点】
-# ロボット関連のスキーマに加えて、認証関連のスキーマを追加する。
+# 【Step 8 からの変更点（Step 12）】
+# ロボット・認証スキーマに加えて、RAG 関連のスキーマを追加する。
 #
 # 新しいスキーマ:
-#   - UserCreate: ユーザー登録リクエスト
-#   - LoginRequest: ログインリクエスト
-#   - TokenResponse: JWT トークンのレスポンス
-#   - UserResponse: ユーザー情報レスポンス（パスワードは含まない！）
+#   - RAGDocumentResponse: アップロード済みドキュメントの情報
+#   - RAGQueryRequest: RAG クエリ（質問）リクエスト
+#   - RAGQueryResponse: RAG 回答レスポンス
+#
+# 【Pydantic スキーマとは？（復習）】
+# HTTP リクエスト/レスポンスの「形」を定義するクラス。
+# FastAPI がリクエストのバリデーション（入力値チェック）と
+# レスポンスのシリアライズ（Python → JSON 変換）を自動で行う。
 #
 # =============================================================================
 
@@ -186,3 +190,100 @@ class UserResponse(BaseModel):
     role: UserRole = Field(description="ロール")
     is_active: bool = Field(description="アカウント有効")
     created_at: datetime = Field(description="作成日時")
+
+
+# =============================================================================
+# RAG スキーマ（Step 12 新規）
+# =============================================================================
+#
+# 【RAG の 3 つの主要操作と対応するスキーマ】
+#
+# 1. ドキュメント登録:
+#    - ファイルアップロード（multipart/form-data）
+#    - レスポンス: RAGDocumentResponse（登録されたドキュメント情報）
+#
+# 2. ドキュメント一覧取得:
+#    - レスポンス: list[RAGDocumentResponse]
+#
+# 3. 質問 → 回答:
+#    - リクエスト: RAGQueryRequest（質問文 + 検索パラメータ）
+#    - レスポンス: RAGQueryResponse（回答 + 参照ソース）
+#
+# 【top_k と min_similarity】
+# top_k: ベクトル検索で取得する上位チャンク数
+#   - 大きいほど多くの文脈を使う → 回答の網羅性が上がる
+#   - 小さいほど最も関連性の高い情報だけ使う → 回答の精度が上がる
+#
+# min_similarity: 最小類似度の閾値（0.0 〜 1.0）
+#   - 高い（0.8+）→ 非常に関連性の高い文書のみ使用
+#   - 低い（0.3）→ 広い範囲から文脈を収集
+#
+
+class RAGDocumentResponse(BaseModel):
+    """
+    RAG ドキュメント情報レスポンス
+
+    アップロードされたドキュメントの詳細情報を返す。
+    chunk_count は、ドキュメントが何個のチャンク（断片）に分割されたかを示す。
+    """
+    id: UUID = Field(description="ドキュメントID")
+    title: str = Field(description="ドキュメントタイトル")
+    source: str = Field(description="ソース（ファイル名など）")
+    file_type: str = Field(description="ファイル形式（pdf, txt, md）")
+    file_size: int = Field(description="ファイルサイズ（バイト）")
+    chunk_count: int = Field(description="分割されたチャンク数")
+    created_at: datetime = Field(description="登録日時")
+
+
+class RAGQueryRequest(BaseModel):
+    """
+    RAG クエリ（質問）リクエスト
+
+    【使い方】
+    {
+      "question": "ロボットの安全停止機能について教えてください",
+      "top_k": 5,
+      "min_similarity": 0.3
+    }
+
+    top_k と min_similarity はオプション。省略するとデフォルト値が使われる。
+    """
+    question: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="質問文（1〜2000文字）",
+        examples=["ロボットの緊急停止ボタンはどこにありますか？"],
+    )
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="検索する上位チャンク数（1〜20）",
+    )
+    min_similarity: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="最小類似度の閾値（0.0〜1.0）",
+    )
+
+
+class RAGQueryResponse(BaseModel):
+    """
+    RAG 回答レスポンス
+
+    【sources フィールド】
+    回答の根拠となったドキュメントチャンクのリスト。
+    ユーザーが「この回答はどの文書に基づいているか」を確認できる。
+    これは RAG の大きなメリット — 回答の出典が明確。
+    """
+    answer: str = Field(description="LLM の生成した回答")
+    sources: list[dict] = Field(
+        default=[],
+        description="参照したドキュメントチャンク（タイトル、テキスト、類似度）",
+    )
+    context_used: int = Field(
+        default=0,
+        description="回答生成に使用したチャンク数",
+    )

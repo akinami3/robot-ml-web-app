@@ -40,7 +40,7 @@
 //   *（それ以外）→ / にリダイレクト
 //
 // 【Step 12 以降で追加されるルート】
-//   /rag         → RAGChatPage（AIチャット）
+//   Step 13 で Auditページ等が追加予定
 // =============================================================================
 
 // ---------------------------------------------------------------------------
@@ -91,6 +91,11 @@ import { SettingsPage } from "@/pages/SettingsPage";
 // DataManagementPage: データ管理ページ ★Step 11 新規
 // 記録セッションの開始/停止、データセットの作成・管理を行う
 import { DataManagementPage } from "@/pages/DataManagementPage";
+
+// RAGChatPage: RAG AIチャットページ ★Step 12 新規
+// ドキュメントをアップロードし、AIに質問して回答を得る
+// SSE（Server-Sent Events）でストリーミング回答をリアルタイム表示
+import { RAGChatPage } from "@/pages/RAGChatPage";
 
 // useAuthStore: 認証ストア（ログイン状態を管理）
 // ProtectedRoute で「ログインしているか？」を確認するために使用
@@ -206,9 +211,11 @@ export default function App() {
         {/* データ管理: /data — Step 11 新規 */}
         <Route path="data" element={<DataManagementPage />} />
 
-        {/* Step 12 以降で追加されるルート:
-            <Route path="rag" element={<RAGChatPage />} />
-        */}
+        {/* RAG AIチャット: /rag — Step 12 新規 */}
+        {/* ドキュメントをアップロードし、LLM に質問して回答を得る */}
+        <Route path="rag" element={<RAGChatPage />} />
+
+        {/* Step 13 以降で追加されるルート: Audit Log 等 */}
       </Route>
 
       {/* ────────────────────────────────────────────────────────── */}

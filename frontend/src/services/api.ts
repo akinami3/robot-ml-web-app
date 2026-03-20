@@ -396,8 +396,76 @@ export const datasetApi = {
 
 // ─── 今後のステップで追加される API ─────────────────────────────────────────
 //
-// Step 12 以降で以下の API クライアントが追加されます:
-//   - ragApi → Step 12: RAG Chat
+// Step 13 以降で以下の API クライアントが追加されます:
+//   - auditApi → Step 13: Audit Logs
+
+// ---------------------------------------------------------------------------
+// 【Step 12: RAG API】 — Retrieval-Augmented Generation
+// ---------------------------------------------------------------------------
+//
+// 💡 RAG（検索拡張生成）とは？
+// 1. ドキュメント（PDF, TXT, MD）をアップロード
+// 2. テキストをチャンク（断片）に分割 → ベクトル化 → DB に保存
+// 3. ユーザーが質問すると、類似ドキュメントを検索 → LLM が回答を生成
+//
+// 主な操作:
+// - ドキュメントのアップロード（multipart/form-data）
+// - ドキュメント一覧の取得
+// - ドキュメントの削除
+// - 質問 → 回答（通常 + SSE ストリーミング）
+//
+// 💡 SSE（Server-Sent Events）とは？
+// サーバーからクライアントへ一方向のストリーミング通信を行うプロトコル。
+// LLM の回答をトークン（単語）ごとにリアルタイムで受信できる。
+// WebSocket と違い、HTTP の上で動作するためシンプル。
+//
+import type { RAGDocument, RAGQueryResult } from "@/types";
+
+export const ragApi = {
+  // ドキュメント一覧を取得
+  // GET /api/v1/rag/documents
+  listDocuments: () =>
+    api.get<RAGDocument[]>("/rag/documents"),
+
+  // ドキュメントをアップロード（multipart/form-data）
+  // POST /api/v1/rag/documents
+  //
+  // 💡 FormData を使う理由:
+  // ファイルアップロードは JSON では送れない。
+  // multipart/form-data 形式にすることで、バイナリファイル + メタデータを同時に送信。
+  // Axios はヘッダーの Content-Type を自動設定してくれる。
+  uploadDocument: (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return api.post<RAGDocument>("/rag/documents", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
+
+  // ドキュメントを削除
+  // DELETE /api/v1/rag/documents/{id}
+  deleteDocument: (id: string) =>
+    api.delete(`/rag/documents/${id}`),
+
+  // 質問して回答を取得（非ストリーミング）
+  // POST /api/v1/rag/query
+  query: (question: string, topK: number = 5, minSimilarity: number = 0.3) =>
+    api.post<RAGQueryResult>("/rag/query", {
+      question,
+      top_k: topK,
+      min_similarity: minSimilarity,
+    }),
+
+  // SSE ストリーミングの URL を生成（fetch API で直接取得する用）
+  // POST /api/v1/rag/query/stream
+  //
+  // 💡 このメソッドは URL を返すだけ。実際の SSE 接続は
+  // RAGChatPage.tsx 内で EventSource API を使って行う。
+  getStreamUrl: () => {
+    const baseUrl = api.defaults.baseURL || "/api/v1";
+    return `${baseUrl}/rag/query/stream`;
+  },
+};
 
 // ---------------------------------------------------------------------------
 // 【デフォルトエクスポート】

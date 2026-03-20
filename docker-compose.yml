@@ -1,22 +1,25 @@
 # =============================================================================
-# Step 9: Docker Compose — React + Vite フロントエンド追加
+# Step 12: Docker Compose — Ollama LLM + Redis 追加
 # =============================================================================
 #
-# 【Step 8 からの変更点】
-# - frontend サービスを Nginx 静的配信 → Vite 開発サーバーに変更
-# - Vite はホットモジュールリプレースメント（HMR）を提供し、
-#   ファイル変更時にページリロードなしで即座に反映される
+# 【Step 9 からの変更点】
+# - redis サービスを追加（Step 11: データ記録用）
+# - ollama サービスを追加（Step 12: RAG の LLM サーバー）
+# - backend に REDIS_URL, OLLAMA_URL 環境変数を追加
+# - gateway に REDIS_URL 環境変数を追加
 #
-# 【HMR（Hot Module Replacement）とは？】
-# コードを変更したとき、ブラウザをリロードせずに変更部分だけを
-# リアルタイムで入れ替える機能。開発体験が大幅に向上する。
-# - CSS の変更 → 即座に反映（ページ状態を保持）
-# - React コンポーネントの変更 → 即座に反映（state をなるべく保持）
+# 【サービス構成（Step 12: 6サービス）】
 #
-# 【Vite とは？】
-# フランス語で「速い」を意味する次世代フロントエンドビルドツール。
-# 従来の webpack に比べ、起動が大幅に速い（ネイティブ ESM を活用）。
-# Vue.js の作者 Evan You が開発した。
+#   ブラウザ → frontend (Vite :3000)
+#           → gateway  (WebSocket :8080) → Redis
+#           → backend  (FastAPI :8000) → PostgreSQL
+#                                          → Redis
+#                                          → Ollama (LLM :11434)
+#
+# 【Ollama とは？】
+# ローカルで LLM（大規模言語モデル）を動かせるオープンソースツール。
+# Docker コンテナとして起動し、HTTP API で LLM にアクセスできる。
+# llama3, mistral, gemma, nomic-embed-text など多数のモデルをサポート。
 #
 # =============================================================================
 
@@ -43,14 +46,25 @@ services:
       retries: 5
 
   # ===========================================================================
-  # Gateway サービス（Go WebSocket サーバー）
+  # Gateway サービス（Go WebSocket サーバー）— Step 12 更新
   # ===========================================================================
+  #
+  # 【Step 11 からの変更点】
+  # - REDIS_URL 環境変数を追加（Redis Streams へのデータ公開用）
+  # - redis サービスへの依存関係を追加
+  #
   gateway:
     build:
       context: ./gateway
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    environment:
+      # Step 11: Redis にセンサーデータを公開する
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
@@ -89,8 +103,14 @@ services:
       # 本番では .env ファイルに書き、docker-compose.yml にはハードコードしない。
       # openssl rand -hex 32 で生成するのが推奨。
       SECRET_KEY: "dev-secret-key-change-in-production-please"
+      # --- Step 11: Redis 接続 ---
+      REDIS_URL: "redis://redis:6379/0"
+      # --- Step 12: Ollama LLM 接続 ---
+      OLLAMA_URL: "http://ollama:11434"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     command: >
       sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
@@ -100,6 +120,63 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+
+  # ===========================================================================
+  # Redis — メッセージキュー + キャッシュ（Step 11 追加）
+  # ===========================================================================
+  #
+  # 【Redis の役割】
+  # 1. Redis Streams: Gateway → Backend のセンサーデータ転送
+  # 2. Pub/Sub: リアルタイム通知
+  # 3. キャッシュ: 頻繁にアクセスするデータの高速読み出し
+  #
+  # 【Redis Streams とは？】
+  # メッセージキューの一種。時系列でメッセージを保存し、
+  # Consumer Group パターンで複数のワーカーが並列処理できる。
+  # 従来の Kafka に比べて軽量で、組み込みが簡単。
+  #
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    # appendonly: データを永続化（Redis再起動後もデータが残る）
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ===========================================================================
+  # Ollama — ローカル LLM サーバー（Step 12 追加）
+  # ===========================================================================
+  #
+  # 【Ollama とは？】
+  # ローカルで LLM（大規模言語モデル）を実行するツール。
+  # クラウド API (OpenAI, Claude) を使わず、自分のマシンで AI を動かせる。
+  #
+  # 【メリット】
+  # - データがローカルに留まる（プライバシー保護）
+  # - API 料金がかからない
+  # - オフライン環境でも動作可能
+  #
+  # 【使用するモデル】
+  # - llama3: テキスト生成（質問応答）用 — 約4GBのストレージが必要
+  # - nomic-embed-text: テキスト埋め込み（ベクトル化）用 — 約270MB
+  #
+  # 初回起動時にモデルのダウンロードが必要:
+  #   docker exec -it <container> ollama pull llama3
+  #   docker exec -it <container> ollama pull nomic-embed-text
+  #
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
 
   # ===========================================================================
   # Frontend サービス（React + Vite 開発サーバー）— Step 9 更新
@@ -139,3 +216,5 @@ services:
 # =============================================================================
 volumes:
   pgdata:
+  redis_data:
+  ollama_data:

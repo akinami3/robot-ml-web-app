@@ -1,23 +1,32 @@
 # =============================================================================
-# Step 11: ORM モデル定義（データ記録対応版）
+# Step 12: ORM モデル定義（RAG対応版）
 # =============================================================================
 #
-# 【Step 8 からの変更点（Step 11）】
-# RobotModel, UserModel に加えて以下を追加:
-# - SensorDataModel: センサーデータ（時系列データ）
-# - RecordingSessionModel: 記録セッション（録画管理）
-# - DatasetModel: 機械学習用データセット
+# 【Step 11 からの変更点（Step 12）】
+# RobotModel, UserModel, SensorDataModel, RecordingSessionModel, DatasetModel
+# に加えて以下を追加:
+# - RAGDocumentModel: RAG用ドキュメント（アップロードされた文書）
+# - DocumentChunkModel: ドキュメントチャンク（文書を分割した断片 + ベクトル）
 #
 # 【各モデルの関係】
 #
 #   User ─────┬──── RecordingSession ──── SensorData
 #             │           │
-#             └──── Dataset（RecordingSession のデータをまとめる）
+#             ├──── Dataset（RecordingSession のデータをまとめる）
+#             │
+#             └──── RAGDocument ──── DocumentChunk（ベクトル付き）
 #
-# 【PostgreSQL 固有の型】
-# - JSONB: JSON データを効率的に保存・検索できる PostgreSQL 固有の型
-#   通常の JSON 型と違い、バイナリ形式で保存されるため検索が高速
-# - ARRAY: PostgreSQL 配列型（[1, 2, 3] のようなリストを1カラムに保存）
+# 【pgvector とは？】
+# PostgreSQL の拡張機能で、ベクトル（数値の配列）を効率的に保存・検索できる。
+# 768次元のベクトル同士のコサイン類似度を高速に計算し、
+# 意味的に近いテキストを見つけるのに使う。
+#
+# 通常の SQL:
+#   SELECT * FROM products WHERE name = 'ロボット'  ← 完全一致検索
+#
+# pgvector:
+#   SELECT * FROM chunks ORDER BY embedding <=> query_vector LIMIT 5
+#   ← ベクトルが近い順（意味的に類似した順）に5件取得
 #
 # =============================================================================
 
@@ -349,3 +358,123 @@ class DatasetModel(Base):
 
     def __repr__(self) -> str:
         return f"<DatasetModel(id={self.id}, name='{self.name}')>"
+
+
+# =============================================================================
+# RAGDocumentModel（Step 12 新規）
+# =============================================================================
+#
+# 【役割】
+# アップロードされたドキュメント（PDF, TXT, MD ファイル）の情報を保存する。
+# ドキュメント本体のテキストは chunks（チャンク）に分割して保存される。
+#
+# 【テーブルリレーション】
+# RAGDocument ─── 1:N ──── DocumentChunk
+# 1つのドキュメントが複数のチャンクに分割される。
+#
+class RAGDocumentModel(Base):
+    """RAG ドキュメント（アップロードされた文書）"""
+    __tablename__ = "rag_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    title: Mapped[str] = mapped_column(
+        String(500), nullable=False,
+    )
+    # source: ファイル名やURLなど、ドキュメントの出所
+    source: Mapped[str] = mapped_column(
+        String(1000), nullable=False, default="",
+    )
+    # file_type: "pdf", "txt", "md" など
+    file_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="txt",
+    )
+    # content: ドキュメント全体のテキスト（チャンク分割の元データ）
+    content: Mapped[str] = mapped_column(
+        Text, nullable=False, default="",
+    )
+    file_size: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+    )
+    # chunk_count: このドキュメントから生成されたチャンク数
+    chunk_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+    )
+    # metadata_: ドキュメントの追加メタデータ（JSONB）
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, default={},
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        server_default=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RAGDocumentModel(id={self.id}, title='{self.title}')>"
+
+
+# =============================================================================
+# DocumentChunkModel（Step 12 新規）
+# =============================================================================
+#
+# 【チャンク（Chunk）とは？】
+# ドキュメントを小さな断片に分割したもの。
+# 例: 10ページの PDF → 50個のチャンク（各チャンク: 500文字程度）
+#
+# 各チャンクには embedding（ベクトル埋め込み）が付与される:
+# 「ロボットの安全機能について」→ [0.12, -0.45, 0.78, ..., 0.34]（768次元）
+#
+# 【なぜチャンクに分割するのか？】
+# 1. LLM のコンテキストウィンドウに収まるサイズにする
+# 2. 関連する部分だけを検索で取得できる（ドキュメント全体は不要）
+# 3. ベクトル検索の精度が上がる（小さいテキストほど意味が明確）
+#
+# 【embedding カラム】
+# pgvector の Vector 型を使用。768次元の浮動小数点配列を保存する。
+# ※ ここでは Vector 型を使わず ARRAY(Float) で代用（pgvector拡張が不要な環境向け）
+# 本番環境では pgvector の Vector(768) カラムと HNSW インデックスを使うのが推奨。
+#
+class DocumentChunkModel(Base):
+    """ドキュメントチャンク（ベクトル埋め込み付き文書断片）"""
+    __tablename__ = "document_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    # 所属するドキュメントへの外部キー
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("rag_documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # チャンクのテキスト内容
+    content: Mapped[str] = mapped_column(
+        Text, nullable=False,
+    )
+    # embedding: テキストをベクトルに変換したもの（768次元の浮動小数点配列）
+    # 💡 pgvector の Vector(768) を使うのが理想だが、
+    #    学習環境では ARRAY(Float) で代用する（pgvector 拡張不要）
+    embedding: Mapped[list] = mapped_column(
+        ARRAY(Float), nullable=True,
+    )
+    # chunk_index: ドキュメント内でのチャンクの順番（0始まり）
+    chunk_index: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+    )
+    # metadata_: チャンクの追加情報（ページ番号、セクション名など）
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, default={},
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        # ドキュメントIDで検索を高速化するインデックス
+        Index("ix_chunks_document_id", "document_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<DocumentChunkModel(id={self.id}, doc={self.document_id}, idx={self.chunk_index})>"

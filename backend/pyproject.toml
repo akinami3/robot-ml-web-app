@@ -1,22 +1,27 @@
 # =============================================================================
-# Step 11: Python プロジェクト設定（データ記録ライブラリ追加）
+# Step 12: Python プロジェクト設定（RAG ライブラリ追加）
 # =============================================================================
 #
-# 【Step 8 からの追加ライブラリ（Step 11）】
-# - redis[hiredis]: Redis 非同期クライアント（Streams, Pub/Sub）
-# - structlog: 構造化ログ（JSONフォーマットのログ出力）
+# 【Step 11 からの追加ライブラリ（Step 12）】
+# - httpx: 非同期HTTPクライアント（Ollama API 呼び出し用）
+# - pypdf: PDF テキスト抽出（ドキュメントアップロード用）
 #
-# 【なぜ redis + structlog？】
-# redis: Redis Streams でセンサーデータの記録・読み取りを行う
-# structlog: 従来の print() による出力を構造化ログに置き換え、
-#            ログの検索・分析を容易にする
+# 【なぜ httpx？】
+# Ollama は HTTP API を提供するので、Python から呼び出すには HTTP クライアントが必要。
+# httpx は async/await 対応の高性能 HTTP クライアントで、FastAPI との相性が良い。
+# requests と API が似ているが、非同期処理に対応している点が異なる。
+#
+# 【なぜ pypdf？】
+# PDF ファイルからテキストを抽出するためのライブラリ。
+# RAG ではアップロードされた PDF のテキストを読み取り、
+# チャンクに分割してベクトル化する必要がある。
 #
 # =============================================================================
 
 [project]
 name = "robot-backend"
-version = "0.4.0"
-description = "Robot AI Web App — FastAPI バックエンド（データ記録対応）"
+version = "0.5.0"
+description = "Robot AI Web App — FastAPI バックエンド（RAG対応）"
 requires-python = ">=3.11"
 
 dependencies = [
@@ -35,6 +40,9 @@ dependencies = [
     # --- Step 11: データ記録 ---
     "redis[hiredis]>=5.0.0",     # Redis 非同期クライアント + 高速パーサー
     "structlog>=24.1.0",         # 構造化ログ
+    # --- Step 12: RAG ---
+    "httpx>=0.27.0",             # 非同期HTTPクライアント（Ollama API用）
+    "pypdf>=4.0.0",              # PDFテキスト抽出
 ]
 
 [project.optional-dependencies]

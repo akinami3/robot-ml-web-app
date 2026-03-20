@@ -63,7 +63,7 @@ import { NavLink } from "react-router-dom";
  * - Bot            → ロボットのアイコン（ロゴ表示用）
  * - ChevronLeft    → 左向き矢印のアイコン（折りたたみボタン用）
  *
- * Step 11 以降で追加:
+ * 【Step 11 以降で追加】
  * - Database       → データベースのアイコン（データ管理用）
  * - MessageSquare  → 吹き出しのアイコン（RAGチャット用）
  */
@@ -77,6 +77,7 @@ import {
   Bot,
   ChevronLeft,
   Database,
+  MessageSquare,
 } from "lucide-react";
 
 /**
@@ -149,11 +150,13 @@ const navItems = [
   { to: "/sensors", label: "Sensor View", icon: Activity },
   /** データ管理 — operator（操作者）以上の権限が必要 ★Step 11 新規 */
   { to: "/data", label: "Data Management", icon: Database, role: "operator" },
+  /** RAG チャット — すべてのユーザーがアクセス可能 ★Step 12 新規 */
+  { to: "/rag", label: "RAG Chat", icon: MessageSquare },
   /** 設定 — すべてのユーザーがアクセス可能 */
   { to: "/settings", label: "Settings", icon: Settings },
 
-  // Step 12 以降で追加されるメニュー項目:
-  // { to: "/rag", label: "RAG Chat", icon: MessageSquare },
+  // Step 13 以降で追加されるメニュー項目:
+  // { to: "/audit", label: "Audit Logs", icon: Shield };
 ];
 
 // -------------------------------------------------------
