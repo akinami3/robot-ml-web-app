@@ -13,18 +13,21 @@
  * フッターなど）を一箇所にまとめるためのコンポーネントです。
  * 各ページはこのレイアウトの「中身」として表示されます。
  *
- * 【このファイルの構造（Step 9）】
+ * 【このファイルの構造（Step 10）】
  * ┌──────────────────────────────────────┐
  * │ ┌────────┐ ┌─────────────────────┐   │
+ * │ │        │ │ StatusBar           │   │ ★Step 10 新規
+ * │ │Sidebar │ ├─────────────────────┤   │
  * │ │        │ │                     │   │
- * │ │Sidebar │ │ <Outlet /> ← ページ │   │
+ * │ │        │ │ <Outlet /> ← ページ │   │
  * │ │        │ │                     │   │
  * │ └────────┘ └─────────────────────┘   │
  * └──────────────────────────────────────┘
  *
- * 【Step 10 以降で追加される要素】
- * - StatusBar: ロボットの接続状態やバッテリーを上部に表示するバー
- * - useWebSocket: WebSocket接続を管理するカスタムフック
+ * 【Step 9 からの変更点（Step 10）】
+ * - StatusBar: ロボットの接続状態やバッテリーを上部に表示するバーを追加
+ * - useWebSocket: WebSocket接続を管理するカスタムフックを追加
+ * - リアルタイムでロボットの状態を受信・表示できるようになった
  */
 
 // -------------------------------------------------------
@@ -51,9 +54,23 @@ import { Outlet } from "react-router-dom";
  */
 import { Sidebar } from "./Sidebar";
 
-// Step 10 以降で追加:
-// import { StatusBar } from "@/components/robot/StatusBar";
-// import { useWebSocket } from "@/hooks/useWebSocket";
+/**
+ * 【StatusBar】上部のステータスバーコンポーネント ★Step 10 新規
+ * ロボットの接続状態やバッテリー残量を表示します。
+ * "@/" は src フォルダのルートを指すエイリアス（ショートカット）です。
+ * これにより "../../components/robot/StatusBar" のような長いパスを避けられます。
+ */
+import { StatusBar } from "@/components/robot/StatusBar";
+
+/**
+ * 【useWebSocket】WebSocket接続を管理するカスタムフック ★Step 10 新規
+ * WebSocket = サーバーとリアルタイムで双方向通信する技術です。
+ * ロボットの状態をリアルタイムで受信するために使います。
+ *
+ * カスタムフック = "use" で始まる自作の関数で、
+ * 状態管理やロジックを再利用可能な形にまとめたものです。
+ */
+import { useWebSocket } from "@/hooks/useWebSocket";
 
 // -------------------------------------------------------
 // コンポーネント定義
@@ -73,8 +90,22 @@ import { Sidebar } from "./Sidebar";
  * ルーター設定ファイルでこのコンポーネントを使うために必要です。
  */
 export function AppLayout() {
-  // Step 10 以降で追加:
-  // const { isConnected, reconnectCount } = useWebSocket();
+  /**
+   * 【useWebSocket フックの使用】★Step 10 新規
+   * useWebSocket() を呼び出すと、WebSocket接続に関する情報が返されます。
+   *
+   * 【分割代入（Destructuring）】
+   * const { isConnected, reconnectCount } = useWebSocket();
+   * これは「分割代入」という書き方で、オブジェクトから必要なプロパティだけを
+   * 取り出して変数にしています。以下と同じ意味です：
+   *   const result = useWebSocket();
+   *   const isConnected = result.isConnected;
+   *   const reconnectCount = result.reconnectCount;
+   *
+   * - isConnected: サーバーに接続されているか（true/false）
+   * - reconnectCount: 再接続を試みた回数（0なら一度も切断されていない）
+   */
+  const { isConnected, reconnectCount } = useWebSocket();
 
   /**
    * 【JSX の return 文】
@@ -114,15 +145,18 @@ export function AppLayout() {
       {/**
        * 【右側のコンテナ】
        * メインコンテンツを表示するための div です。
-       *
-       * - "flex"            → Flexbox を使用
-       * - "flex-1"          → 残りのスペースをすべて占める（Sidebarの横幅を引いた分）
-       * - "flex-col"        → 子要素を縦方向に並べる（デフォルトは横方向）
-       * - "overflow-hidden" → はみ出した内容を隠す
        */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Step 10 以降で追加: StatusBar（接続状態やバッテリー表示） */}
-        {/* <StatusBar isConnected={isConnected} reconnectCount={reconnectCount} /> */}
+        {/**
+         * 【StatusBar コンポーネント】★Step 10 新規
+         * 接続状態やロボット情報を表示するバーです。
+         *
+         * 【Props（プロパティ）とは？】
+         * コンポーネントに渡すデータのことです。HTMLの属性に似ています。
+         * ここでは isConnected と reconnectCount を StatusBar に渡しています。
+         * StatusBar はこの値を使って表示内容を変えます。
+         */}
+        <StatusBar isConnected={isConnected} reconnectCount={reconnectCount} />
 
         {/**
          * 【main タグ - メインコンテンツエリア】
@@ -142,9 +176,11 @@ export function AppLayout() {
            *
            * 例えば：
            *   URL が "/"         → DashboardPage がここに表示される
+           *   URL が "/control"  → ManualControlPage がここに表示される
+           *   URL が "/sensors"  → SensorViewPage がここに表示される
            *   URL が "/settings" → SettingsPage がここに表示される
            *
-           * レイアウト（Sidebar）は変わらず、
+           * レイアウト（Sidebar、StatusBar）は変わらず、
            * この <Outlet /> の中身だけが切り替わります。
            * これがSPA（Single Page Application）の動作原理です。
            */}

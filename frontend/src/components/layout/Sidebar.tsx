@@ -8,27 +8,27 @@
  * 定義しています。ユーザーはここからアプリの各ページに移動できます。
  *
  * 【このコンポーネントの機能】
- * 1. ナビゲーションリンク（Dashboard、Settings）の表示
+ * 1. ナビゲーションリンク（Dashboard、Control、Navigation、Sensors、Settings）の表示
  * 2. 折りたたみ（collapse）機能 — サイドバーを小さくできる
  * 3. ユーザーの権限（role）に基づいたメニューの表示/非表示
  * 4. 現在のページをハイライト表示
  * 5. ログアウト機能
  *
- * 【サイドバーの構造（Step 9）】
+ * 【サイドバーの構造（Step 10）】
  * ┌──────────┐
  * │ ロゴ  [<] │  ← ヘッダー（折りたたみボタン付き）
  * ├──────────┤
  * │ Dashboard │  ← ナビゲーションリンク
+ * │ Control   │  ★Step 10 新規
+ * │ Navigation│  ★Step 10 新規
+ * │ Sensors   │  ★Step 10 新規
  * │ Settings  │
  * ├──────────┤
  * │ ユーザー名 │  ← ユーザー情報とログアウト
  * │ [Logout]  │
  * └──────────┘
  *
- * 【Step 10 以降で追加されるメニュー項目】
- * - Manual Control（手動操作）
- * - Navigation（自律ナビゲーション）
- * - Sensor View（センサー表示）
+ * 【Step 11 以降で追加されるメニュー項目】
  * - Data Management（データ管理）
  * - RAG Chat（AIチャット）
  */
@@ -55,20 +55,23 @@ import { NavLink } from "react-router-dom";
  * 各アイコンは React コンポーネントとしてインポートして使います。
  *
  * - LayoutDashboard → ダッシュボード（概要ページ）のアイコン
+ * - Gamepad2       → ゲームパッド型のアイコン（手動制御ページ用）★Step 10 新規
+ * - Navigation     → ナビゲーション（経路案内）のアイコン ★Step 10 新規
+ * - Activity       → 波形のアイコン（センサーデータ表示用）★Step 10 新規
  * - Settings       → 歯車のアイコン（設定ページ用）
  * - LogOut         → ログアウトのアイコン
  * - Bot            → ロボットのアイコン（ロゴ表示用）
  * - ChevronLeft    → 左向き矢印のアイコン（折りたたみボタン用）
  *
- * Step 10 以降で追加:
- * - Gamepad2       → ゲームパッド型のアイコン（手動制御ページ用）
- * - Navigation     → ナビゲーション（経路案内）のアイコン
- * - Activity       → 波形のアイコン（センサーデータ表示用）
+ * Step 11 以降で追加:
  * - Database       → データベースのアイコン（データ管理用）
  * - MessageSquare  → 吹き出しのアイコン（RAGチャット用）
  */
 import {
   LayoutDashboard,
+  Gamepad2,
+  Navigation,
+  Activity,
   Settings,
   LogOut,
   Bot,
@@ -137,13 +140,16 @@ import { useState } from "react";
 const navItems = [
   /** ダッシュボード — すべてのユーザーがアクセス可能（roleなし） */
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  /** 手動制御 — operator（操作者）以上の権限が必要 ★Step 10 新規 */
+  { to: "/control", label: "Manual Control", icon: Gamepad2, role: "operator" },
+  /** ナビゲーション — operator（操作者）以上の権限が必要 ★Step 10 新規 */
+  { to: "/navigation", label: "Navigation", icon: Navigation, role: "operator" },
+  /** センサー表示 — すべてのユーザーがアクセス可能 ★Step 10 新規 */
+  { to: "/sensors", label: "Sensor View", icon: Activity },
   /** 設定 — すべてのユーザーがアクセス可能 */
   { to: "/settings", label: "Settings", icon: Settings },
 
-  // Step 10 以降で追加されるメニュー項目:
-  // { to: "/control", label: "Manual Control", icon: Gamepad2, role: "operator" },
-  // { to: "/navigation", label: "Navigation", icon: Navigation, role: "operator" },
-  // { to: "/sensors", label: "Sensor View", icon: Activity },
+  // Step 11 以降で追加されるメニュー項目:
   // { to: "/data", label: "Data Management", icon: Database },
   // { to: "/rag", label: "RAG Chat", icon: MessageSquare },
 ];

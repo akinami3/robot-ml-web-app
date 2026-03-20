@@ -17,29 +17,29 @@
 // SPA（Single Page Application）では JavaScript でページ内容を切り替える。
 // React Router がこの切り替えを担当する。
 //
-// 【Step 8（Vanilla JS）からの変更点】
-// Step 8 では「ハッシュルーター」（#/login, #/robots）を使っていたが、
-// React Router v6 では「ブラウザルーター」（/login, /robots）を使用する。
-// ハッシュ（#）が不要になり、通常のURLでページ遷移できる。
+// 【Step 9 からの変更点（Step 10）】
+// - ManualControlPage, NavigationPage, SensorViewPage のルートを追加
+// - WebSocket によるリアルタイム通信が各ページで利用可能に
+// - ジョイスティック操作、キーボード制御、センサー表示が可能に
 //
 // 【このファイルの構造】
 // 1. ProtectedRoute（認証ガード）: ログイン必須ページの保護
 // 2. App コンポーネント: 全ルート（URL → ページ）の定義
 //
-// 【ルート構成の一覧（Step 9）】
+// 【ルート構成の一覧（Step 10）】
 // 認証不要:
 //   /login   → LoginPage
 //   /signup  → SignupPage
 //
 // 認証必要（AppLayout内に表示）:
 //   /            → DashboardPage（トップページ）
+//   /control     → ManualControlPage（ロボット手動操作）★Step 10 新規
+//   /navigation  → NavigationPage（自律ナビゲーション）★Step 10 新規
+//   /sensors     → SensorViewPage（センサー表示）★Step 10 新規
 //   /settings    → SettingsPage（設定）
 //   *（それ以外）→ / にリダイレクト
 //
-// 【Step 10 以降で追加されるルート】
-//   /control     → ManualControlPage（ロボット手動操作）
-//   /navigation  → NavigationPage（自律ナビゲーション）
-//   /sensors     → SensorViewPage（センサー表示）
+// 【Step 11 以降で追加されるルート】
 //   /data        → DataManagementPage（データ管理）
 //   /rag         → RAGChatPage（AIチャット）
 // =============================================================================
@@ -72,6 +72,18 @@ import { SignupPage } from "@/pages/SignupPage";
 // DashboardPage: ダッシュボード（ログイン後の最初のページ）
 // ロボットの概要やステータスを一覧表示する
 import { DashboardPage } from "@/pages/DashboardPage";
+
+// ManualControlPage: ロボットの手動操作ページ
+// ジョイスティックやキーボードでロボットを直接操作する
+import { ManualControlPage } from "@/pages/ManualControlPage";
+
+// NavigationPage: ロボットの自律ナビゲーション（自動走行）ページ
+// 目的地を設定して自動的にロボットを移動させる
+import { NavigationPage } from "@/pages/NavigationPage";
+
+// SensorViewPage: センサーデータの表示ページ
+// LiDAR、カメラ、IMUなどのセンサーデータをリアルタイム表示する
+import { SensorViewPage } from "@/pages/SensorViewPage";
 
 // SettingsPage: 設定ページ
 // テーマ切替、安全制限値、レコーディング設定などを管理する
@@ -176,13 +188,19 @@ export default function App() {
         {/* ユーザーがアプリのトップ（/）にアクセスするとダッシュボードを表示 */}
         <Route index element={<DashboardPage />} />
 
+        {/* ロボット手動操作: /control — Step 10 新規 */}
+        <Route path="control" element={<ManualControlPage />} />
+
+        {/* 自律ナビゲーション: /navigation — Step 10 新規 */}
+        <Route path="navigation" element={<NavigationPage />} />
+
+        {/* センサーデータ表示: /sensors — Step 10 新規 */}
+        <Route path="sensors" element={<SensorViewPage />} />
+
         {/* 設定: /settings */}
         <Route path="settings" element={<SettingsPage />} />
 
-        {/* Step 10 以降で追加されるルート:
-            <Route path="control" element={<ManualControlPage />} />
-            <Route path="navigation" element={<NavigationPage />} />
-            <Route path="sensors" element={<SensorViewPage />} />
+        {/* Step 11 以降で追加されるルート:
             <Route path="data" element={<DataManagementPage />} />
             <Route path="rag" element={<RAGChatPage />} />
         */}
