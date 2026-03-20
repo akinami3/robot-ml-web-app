@@ -1,159 +1,228 @@
-# Step 1: Hello WebSocket 🌐
+# Step 2: 構造化メッセージ 📡
 
-> **ブランチ**: `step/01-hello-websocket`  
-> **前のステップ**: —（最初のステップ）  
-> **次のステップ**: `step/02-protocol-messages`
+## 学習目標
 
----
+このステップで学ぶこと:
 
-## このステップで学ぶこと
+1. **JSON メッセージプロトコル設計** — type + payload パターン
+2. **Go の構造体と JSON マーシャリング** — `json.Marshal` / `json.Unmarshal`
+3. **Go のパッケージ分割** — `protocol/` ディレクトリの追加
+4. **Go のインターフェース** — `Codec` インターフェースで差し替え可能な設計
+5. **ES Modules** — `import` / `export` によるファイル分割
+6. **WASD キーボード入力** — `keydown` / `keyup` イベントの処理
+7. **リアルタイムダッシュボード** — CSS Grid + DOM 操作でセンサー表示
 
-1. **WebSocket** — HTTP との違い、双方向リアルタイム通信の仕組み
-2. **Go 言語の基礎** — `main` 関数、パッケージ、`net/http`、gorilla/websocket
-3. **HTML / JavaScript の基礎** — DOM操作、イベントリスナー、`WebSocket` API
-4. **ブラウザ DevTools** — Network タブで WebSocket 通信を観察
-
----
-
-## 構成図
+## アーキテクチャ
 
 ```
-┌──────────────────┐     WebSocket (ws://)     ┌──────────────────┐
-│   ブラウザ        │◄──────────────────────────►│  Go サーバー      │
-│   index.html     │    双方向リアルタイム通信     │  main.go         │
-│                  │                            │                  │
-│  テキスト入力     │  ── "forward" ──────────►  │  メッセージ受信    │
-│  で送信ボタン     │                            │  → ログ出力       │
-│                  │  ◄── "speed: 0.5 m/s" ──  │  → レスポンス返送  │
-│                  │                            │                  │
-│  受信メッセージ   │  ◄── "sensor: 23.5°C" ──  │  定期的に          │
-│  をリスト表示     │     （1秒ごと）              │  モックデータ送信  │
-└──────────────────┘                            └──────────────────┘
+┌─────────────────────────────────────────────────┐
+│ ブラウザ (frontend/)                              │
+│                                                   │
+│  index.html ─── js/app.js ─── js/protocol.js     │
+│                                                   │
+│  [WASD キーボード] → velocity_cmd JSON             │
+│  [センサーパネル]  ← sensor_data JSON              │
+│  [メッセージログ]  ← command_ack / error JSON      │
+└──────────────────┬──────────────────────────────┘
+                   │ WebSocket (JSON)
+┌──────────────────┴──────────────────────────────┐
+│ Go サーバー (gateway/)                            │
+│                                                   │
+│  main.go ─── protocol/messages.go                 │
+│              protocol/codec.go                    │
+│                                                   │
+│  [readPump]   ← velocity_cmd をデコード・処理     │
+│  [writePump]  → sensor_data を定期送信            │
+│  [sendMessage] → command_ack/error を返信         │
+└─────────────────────────────────────────────────┘
 ```
 
 ## ファイル構成
 
 ```
-robot-ml-web-app/
+step2/
 ├── gateway/
-│   ├── main.go         ← Go WebSocket サーバー（1ファイル！）
-│   └── go.mod          ← Go の依存関係定義
+│   ├── main.go                 # WebSocketサーバー（protocol利用版）
+│   ├── go.mod                  # Goモジュール定義
+│   ├── go.sum                  # 依存関係チェックサム
+│   └── protocol/
+│       ├── messages.go         # メッセージ型定義（Type, Payload構造体）
+│       └── codec.go            # JSON コーデック（Encode/Decode）
 ├── frontend/
-│   └── index.html      ← フロントエンド（1ファイル！）
-├── CURRICULUM.md        ← 全ステップの学習カリキュラム
-└── README.md            ← このファイル
+│   ├── index.html              # UI（センサーダッシュボード + WASDキー表示）
+│   └── js/
+│       ├── protocol.js         # メッセージ組み立て・解析（ES Module）
+│       └── app.js              # メインロジック（接続管理・キーボード入力）
+└── README.md                   # このファイル
 ```
 
-**たった3ファイルです。** Docker 不要、ビルドツール不要。
+## メッセージプロトコル
 
----
+### 共通構造（エンベロープ）
 
-## 起動方法
+すべてのメッセージは以下の共通構造を持ちます:
 
-### 前提条件
+```json
+{
+  "type": "velocity_cmd",
+  "robot_id": "robot-01",
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "payload": { ... }
+}
+```
 
-- **Go** >= 1.22（[インストール方法](https://go.dev/doc/install)）
-- **Webブラウザ**（Chrome / Firefox / Edge）
+| フィールド   | 型       | 説明 |
+|-------------|----------|------|
+| `type`      | string   | メッセージの種類（後述） |
+| `robot_id`  | string   | ロボットの識別子 |
+| `timestamp` | string   | ISO 8601 形式の時刻 |
+| `payload`   | object   | メッセージ本体（type によって構造が異なる） |
 
-### 1. Go サーバーを起動
+### メッセージタイプ一覧
+
+| type           | 方向                 | payload の内容 |
+|----------------|---------------------|---------------|
+| `velocity_cmd` | クライアント → サーバー | `{ linear_x, linear_y, angular_z }` |
+| `sensor_data`  | サーバー → クライアント | `{ temperature, battery, speed, distance }` |
+| `command_ack`  | サーバー → クライアント | `{ status, description }` |
+| `error`        | サーバー → クライアント | `{ code, message }` |
+
+### velocity_cmd の例
+
+```json
+{
+  "type": "velocity_cmd",
+  "robot_id": "robot-01",
+  "timestamp": "2024-01-01T10:30:00.000Z",
+  "payload": {
+    "linear_x": 0.5,
+    "linear_y": 0.0,
+    "angular_z": 0.0
+  }
+}
+```
+
+### WASD キーマッピング
+
+| キー    | linear_x | linear_y | angular_z | 動作 |
+|---------|----------|----------|-----------|------|
+| W       | 0.5      | 0        | 0         | 前進 |
+| S       | -0.5     | 0        | 0         | 後退 |
+| A       | 0        | 0        | 0.5       | 左旋回 |
+| D       | 0        | 0        | -0.5      | 右旋回 |
+| Space   | 0        | 0        | 0         | 停止 |
+
+## セットアップと実行
+
+### 1. サーバー起動
 
 ```bash
 cd gateway
 go run main.go
 ```
 
-以下のように表示されればOK:
+出力:
 ```
-🚀 WebSocket サーバー起動: http://localhost:8080
-   WebSocket エンドポイント: ws://localhost:8080/ws
+🚀 WebSocket サーバー起動 (Step 2: 構造化メッセージ)
+   エンドポイント: ws://localhost:8080/ws
+   プロトコル: JSON
    Ctrl+C で停止
 ```
 
-### 2. ブラウザで開く
+### 2. フロントエンド表示
 
-`frontend/index.html` をブラウザで直接開きます:
-```bash
-# macOS
-open frontend/index.html
+`frontend/index.html` をブラウザで直接開きます。
 
-# Linux
-xdg-open frontend/index.html
+> ⚠️ **ES Modules の注意点**: `file://` プロトコルでは ES Modules の import が
+> CORS エラーになるブラウザがあります。その場合は以下のいずれかの方法を使います:
+>
+> ```bash
+> # 方法1: Python の簡易サーバー
+> cd frontend
+> python3 -m http.server 3000
+> # → http://localhost:3000 でアクセス
+>
+> # 方法2: Node.js の npx serve
+> cd frontend
+> npx serve -p 3000
+> ```
 
-# または、ブラウザのアドレスバーにファイルパスを入力
-```
+### 3. 操作方法
 
-### 3. 試してみる
+1. 「🔌 接続」ボタンをクリック
+2. 「🎮 キーボード OFF」ボタンをクリックして ON に切り替え
+3. **WASD** キーでロボットを操作、**Space** で停止
+4. センサーパネルにリアルタイムでデータが表示される
+5. DevTools（F12）→ Network → WS タブで JSON メッセージを確認
 
-1. 「接続」ボタンをクリック → WebSocket 接続が確立
-2. テキスト入力に `forward` と入力して「送信」 → サーバーに送信される
-3. サーバーからのレスポンスと定期データがリストに表示される
-4. **DevTools を開く**: `F12` → Network タブ → WS フィルター → メッセージを観察!
+## Step 1 → Step 2 の変更点まとめ
 
----
+### Go (gateway)
 
-## 💡 WebSocket とは？
+| 変更 | Step 1 | Step 2 |
+|------|--------|--------|
+| メッセージ形式 | テキスト文字列 | 構造化 JSON |
+| パッケージ構成 | `main` パッケージのみ | `main` + `protocol` パッケージ |
+| メッセージ処理 | `switch cmd` (文字列) | `switch msg.Type` (型付き) |
+| レスポンス | テキスト文字列 | `command_ack` / `error` メッセージ |
+| センサーデータ | `fmt.Sprintf` で文字列生成 | `SensorPayload` 構造体 |
 
-### HTTP との違い
+### JavaScript (frontend)
 
-```
-【HTTP — リクエスト・レスポンス方式】
-ブラウザ: 「データください」 → サーバー: 「はいどうぞ」
-ブラウザ: 「また欲しいです」 → サーバー: 「はいどうぞ」
-（毎回聞かないとデータがもらえない）
+| 変更 | Step 1 | Step 2 |
+|------|--------|--------|
+| ファイル構成 | 全て `index.html` 内 | `js/protocol.js` + `js/app.js` |
+| モジュールシステム | なし | ES Modules (`import`/`export`) |
+| 送信データ | テキスト (`"forward"`) | JSON (`{"type":"velocity_cmd",...}`) |
+| 操作方法 | テキスト入力 + ボタン | WASD キーボード |
+| 表示形式 | テキストログ | センサーダッシュボード + ログ |
 
-【WebSocket — 双方向通信】
-ブラウザ: 「接続したいです」
-サーバー: 「OK、繋がったよ」
-  ↕  以降、どちらからでもいつでも送信可能  ↕
-サーバー: 「新しいデータだよ」（ブラウザが聞いてなくても送れる）
-ブラウザ: 「コマンド送るよ」
-サーバー: 「了解」「また新しいデータだよ」
-```
+## コードリーディングガイド
 
-### なぜロボット操作に WebSocket が必要？
+### 初心者の方へ: 読む順番
 
-- ロボットのセンサーデータは **毎秒20〜50回** 更新される
-- HTTP だと毎回リクエストが必要（遅い、サーバー負荷高い）
-- WebSocket なら一度つなげば、サーバーから勝手にデータが流れてくる
+1. **`protocol/messages.go`** — メッセージの型定義を理解する
+   - `Message` 構造体（エンベロープ）
+   - `VelocityPayload`, `SensorPayload` etc.
+   - `New〇〇` ファクトリ関数
 
----
+2. **`protocol/codec.go`** — JSON のエンコード/デコードを理解する
+   - `Codec` インターフェース
+   - `JSONCodec.Encode()` — 構造体 → JSON
+   - `JSONCodec.Decode()` — JSON → 構造体（2段階デコード）
 
-## 📝 コードの読み方ガイド
+3. **`main.go`** — サーバーのメッセージ処理を理解する
+   - `readPump()` — 受信 → デコード → ハンドラー呼び出し
+   - `handleVelocityCmd()` — 型アサーション
+   - `writePump()` — 構造化センサーデータの定期送信
 
-### gateway/main.go を読む順序
+4. **`js/protocol.js`** — JavaScript 側のメッセージ操作
+   - `MessageType` 定数
+   - `createVelocityCmd()` — メッセージ生成
+   - `KeyBindings` — WASD キーマッピング
 
-1. `import` — 使っているパッケージを確認
-2. `main()` — プログラムの起動処理
-3. `handleWebSocket()` — WebSocket 接続時の処理
-4. `readPump()` — クライアントからメッセージを受信するループ
-5. `writePump()` — クライアントにデータを送信するループ
+5. **`js/app.js`** — UI とキーボード操作
+   - `handleMessage()` — Type ベースのディスパッチ
+   - `handleKeyDown()` — キーボード入力処理
+   - `sendVelocityCmd()` — コマンド送信フロー
 
-### frontend/index.html を読む順序
+## チャレンジ課題
 
-1. `<body>` — HTML の構造（ボタン、入力欄、メッセージリスト）
-2. `<script>` — JavaScript のロジック
-3. `connectWebSocket()` — WebSocket 接続を確立
-4. `ws.onmessage` — サーバーからメッセージを受信した時の処理
-5. `sendMessage()` — テキストをサーバーに送信
+### 🟢 初級
+1. 新しいキーバインドを追加してみよう（例: Q/E で左右移動）
+2. `sensor_data` の受信回数をカウントして表示してみよう
 
----
+### 🟡 中級
+3. キーを離した時（keyup）に自動で停止コマンドを送信しよう
+4. Go 側に新しいメッセージタイプ `status_request` を追加して、クライアントからロボットの状態を問い合わせられるようにしよう
 
-## 🏋️ チャレンジ課題
+### 🔴 上級
+5. `protocol/codec.go` に `MsgPackCodec` を追加して、同じ `Codec` インターフェースで MessagePack エンコード/デコードを実装しよう
+6. 複数のクライアントが同時に接続できるよう、接続管理の仕組み（Hub）を `main.go` に追加しよう（→ Step 4 で本格的に実装）
 
-Step 2 に進む前に、以下を試してみましょう:
+## 次のステップ
 
-1. **送信メッセージを変えてみよう**: `forward` 以外に `backward`, `left`, `right` を送ってみる。サーバーの応答はどう変わる？
-2. **送信間隔を変えてみよう**: `main.go` の `time.Second` を `500 * time.Millisecond` に変えたらどうなる？
-3. **複数タブで接続**: ブラウザの別タブでも `index.html` を開いて接続してみよう。両方にデータが届く？
-4. **DevTools で観察**: Network → WS タブで、メッセージのサイズとタイミングを確認しよう
-5. **サーバーを止めてみよう**: `Ctrl+C` でサーバーを止めたら、ブラウザ側はどうなる？
-
----
-
-## 次のステップへ
-
-Step 2 では、テキストベースの通信を **構造化メッセージ（JSON / MessagePack）** に進化させます:
-
-```bash
-git checkout step/02-protocol-messages
-```
+**Step 3: Adapter パターン** (`step/03-adapter-pattern`)
+- Go のインターフェースによる多態性
+- デザインパターン: Adapter, Factory, Registry
+- Docker Compose の導入
