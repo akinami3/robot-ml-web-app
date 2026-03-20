@@ -1,48 +1,39 @@
 <!DOCTYPE html>
 <!--
   =============================================================================
-  Step 2: 構造化メッセージ — フロントエンド
+  Step 3: Adapter パターン — フロントエンド
   =============================================================================
 
-  【Step 1 からの変更点】
-  1. JavaScript を外部ファイルに分離（js/protocol.js, js/app.js）
-  2. ES Modules（import/export）を使用
-  3. 構造化 JSON メッセージの送受信
-  4. WASD キーボード操作でロボットを制御
-  5. センサーデータをダッシュボード風に表示（カード形式）
-  6. メッセージログに加え、リアルタイムセンサーパネルを追加
+  【Step 2 からの変更点】
+  1. ロボット接続/切断ボタンの追加
+  2. 緊急停止（E-Stop）ボタンの追加（大きな赤いボタン）
+  3. オドメトリ表示（位置・速度）
+  4. バッテリー表示（残量バー + 電圧 + 温度）
+  5. アダプター情報の表示
+  6. protocol.js を protocol-base.js にリネームし、拡張版 protocol.js を使用
 
-  【ファイル構成の進化】
-  Step 1: index.html の中に HTML + CSS + JS 全てを記述（約600行）
-  Step 2: HTML/CSS は index.html、JS ロジックは外部ファイルに分離
-    ├── index.html       ← このファイル（構造と見た目）
+  【ファイル構成】
+  Step 3:
+    ├── index.html         ← このファイル
     └── js/
-        ├── protocol.js  ← メッセージの定義・変換
-        └── app.js       ← WebSocket接続・UI操作・キーボード入力
+        ├── protocol-base.js  ← Step 2 の protocol.js（そのまま）
+        ├── protocol.js       ← Step 3 拡張版（adapter_info, estop 等）
+        └── app.js            ← メインアプリ（Step 3 版）
   =============================================================================
 -->
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Step 2: 構造化メッセージ 📡</title>
+  <title>Step 3: Adapter パターン 🤖</title>
 
   <style>
-    /* ===================================================================
-       基本スタイル（Step 1 と共通部分 + 新規追加）
-       =================================================================== */
-
-    * {
-      /* 【box-sizing: border-box とは？】
-         要素の幅・高さの計算に padding と border を含める。
-         これがないと width: 100% + padding: 10px でコンテナからはみ出す。
-         現代のCSSでは必須の設定。 */
-      box-sizing: border-box;
-    }
+    /* ===== 基本スタイル（Step 2 踏襲） ===== */
+    * { box-sizing: border-box; }
 
     body {
       font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      max-width: 900px;
+      max-width: 960px;
       margin: 0 auto;
       padding: 20px;
       background-color: #1a1a2e;
@@ -53,9 +44,7 @@
     h1 { color: #00d4ff; border-bottom: 2px solid #00d4ff; padding-bottom: 10px; }
     h2 { color: #00d4ff; font-size: 1.1em; margin: 16px 0 8px; }
 
-    /* ===================================================================
-       接続状態
-       =================================================================== */
+    /* ===== 接続状態 ===== */
     .status {
       display: flex;
       align-items: center;
@@ -74,9 +63,7 @@
     }
     .status-dot.connected { background-color: #28a745; }
 
-    /* ===================================================================
-       ボタン
-       =================================================================== */
+    /* ===== ボタン ===== */
     button {
       padding: 10px 20px;
       border: none;
@@ -91,15 +78,11 @@
 
     .btn-connect { background-color: #28a745; color: white; }
     .btn-disconnect { background-color: #dc3545; color: white; }
-
     .btn-keyboard {
       background-color: #16213e;
       color: #ffd700;
       border: 1px solid #ffd700;
     }
-    /* 【.active クラス】
-       キーボード操作が有効な時に追加されるクラス。
-       背景色が変わることで、「現在ON」であることが視覚的にわかる。 */
     .btn-keyboard.active {
       background-color: #ffd700;
       color: #1a1a2e;
@@ -114,20 +97,42 @@
     }
 
     /* ===================================================================
-       CSS Grid レイアウト — ダッシュボード
-       =================================================================== */
-    /*
-      【CSS Grid とは？】
-      2次元レイアウト（行と列）を簡単に作れるCSS機能。
-      Flexbox は1次元（横並び or 縦並び）が得意だが、
-      Grid は行と列を同時に定義できる。
+       E-Stop（緊急停止）ボタン
+       ===================================================================
+       【実際のロボットの E-Stop】
+       産業用ロボットには必ず大きな赤い「非常停止ボタン」がある。
+       法律で義務付けられている（ISO 13850）。
+       ここではその仮想版をUIに実装する。
+       常に目立つ位置に配置し、すぐに押せるようにする。 */
+    .btn-estop {
+      background-color: #dc3545;
+      color: white;
+      font-size: 18px;
+      padding: 16px 32px;
+      border-radius: 50%;
+      border: 4px solid #ff6b6b;
+      box-shadow: 0 0 20px rgba(220, 53, 69, 0.4);
+      min-width: 80px;
+      min-height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.1s;
+    }
+    .btn-estop:hover:not(:disabled) {
+      background-color: #ff1a1a;
+      box-shadow: 0 0 30px rgba(220, 53, 69, 0.7);
+      transform: scale(1.05);
+    }
+    .btn-estop:active:not(:disabled) {
+      transform: scale(0.95);
+    }
 
-      grid-template-columns: repeat(2, 1fr)
-        → 2列のグリッドを作成。1fr = 残りスペースを均等に分配。
+    /* ロボット接続ボタン */
+    .btn-robot-connect { background-color: #17a2b8; color: white; }
+    .btn-robot-disconnect { background-color: #6c757d; color: white; }
 
-      gap: 12px
-        → グリッドアイテム間の隙間。
-    */
+    /* ===== ダッシュボード ===== */
     .dashboard {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -135,21 +140,12 @@
       margin: 16px 0;
     }
 
-    /* ===================================================================
-       センサーカード
-       =================================================================== */
-    /*
-      センサーの各値を「カード」形式で表示する。
-      Step 1 のテキスト表示から、ビジュアルなダッシュボードに進化。
-    */
     .sensor-card {
       background-color: #16213e;
       border-radius: 8px;
       padding: 16px;
       text-align: center;
       border: 1px solid #2a2a4e;
-      /* transition: border-color を設定して、
-         データ更新時にアニメーション効果を付けられるようにする。 */
       transition: border-color 0.3s;
     }
 
@@ -157,8 +153,6 @@
       font-size: 12px;
       color: #888;
       text-transform: uppercase;
-      /* 【letter-spacing とは？】
-         文字間のスペース。大文字ラベルに少し広げるとデザインが整う。 */
       letter-spacing: 1px;
       margin-bottom: 8px;
     }
@@ -171,18 +165,61 @@
     }
 
     /* ===================================================================
-       WASD キーボードUI
-       =================================================================== */
-    /*
-      【WASD 表示の構造】
-      WASDキーの配置を視覚的に再現する。
+       バッテリーバー
+       ===================================================================
+       CSS で進捗バーを実装する方法。
+       外側のコンテナ（固定幅）と内側のバー（widthを動的に変更）。 */
+    .battery-bar-container {
+      width: 100%;
+      height: 20px;
+      background-color: #0f0f23;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 8px;
+      border: 1px solid #333;
+    }
 
-         [W]
-      [A] [S] [D]
-        [SPACE]
+    .battery-bar {
+      height: 100%;
+      background-color: #28a745;
+      border-radius: 10px;
+      transition: width 0.5s ease, background-color 0.5s ease;
+      width: 0%;
+    }
 
-      CSS Grid を使って、キーの位置を正確に配置。
-    */
+    /* ===== アダプター情報パネル ===== */
+    .adapter-info {
+      background-color: #16213e;
+      border: 1px solid #2a2a4e;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .adapter-info .info-item {
+      text-align: center;
+    }
+
+    .adapter-info .info-label {
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .adapter-info .info-value {
+      font-size: 16px;
+      font-weight: bold;
+      color: #ffd700;
+      margin-top: 4px;
+    }
+
+    /* ===== WASD キーボード ===== */
     .keyboard-panel {
       background-color: #16213e;
       border-radius: 8px;
@@ -192,7 +229,6 @@
 
     .wasd-grid {
       display: grid;
-      /* 3列: A | S | D の位置に対応 */
       grid-template-columns: repeat(3, 56px);
       gap: 6px;
       justify-content: center;
@@ -212,33 +248,21 @@
       font-size: 18px;
       font-weight: bold;
       color: #888;
-      /* transition で押下時のアニメーションを滑らかに */
       transition: all 0.1s ease;
-      /* ユーザーがテキスト選択できないようにする */
       user-select: none;
     }
 
-    /* キーが押された時（active クラスが付く） */
     .key.active {
       background-color: #00d4ff;
       border-color: #00d4ff;
       color: #1a1a2e;
-      /* 【transform: scale() とは？】
-         要素を拡大/縮小するCSS変換。
-         0.95 = 5%縮小 → 押し込む感じを表現。 */
       transform: scale(0.95);
-      /* 【box-shadow とは？】
-         要素の周りに影を付ける。
-         0 0 10px → ぼかし具合 10px の発光効果。 */
       box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
     }
 
-    /* W キーは2列目に配置 */
     .key-w { grid-column: 2; }
-
-    /* スペースキーは横長 */
     .key-space {
-      grid-column: 1 / 4;  /* 1列目から4列目まで（= 3列全幅） */
+      grid-column: 1 / 4;
       width: auto;
       font-size: 14px;
     }
@@ -251,15 +275,13 @@
       min-height: 1.2em;
     }
 
-    /* ===================================================================
-       メッセージログ
-       =================================================================== */
+    /* ===== メッセージログ ===== */
     .messages {
       background-color: #0f0f23;
       border: 1px solid #333;
       border-radius: 8px;
       padding: 16px;
-      max-height: 300px;
+      max-height: 250px;
       overflow-y: auto;
       font-family: 'Cascadia Code', 'Fira Code', monospace;
       font-size: 13px;
@@ -272,9 +294,7 @@
     .timestamp { color: #666; font-size: 11px; }
     .counter { color: #888; font-size: 13px; margin-top: 8px; }
 
-    /* ===================================================================
-       説明テキスト
-       =================================================================== */
+    /* ===== 説明テキスト ===== */
     .help {
       background-color: #16213e;
       border-left: 4px solid #00d4ff;
@@ -285,10 +305,6 @@
       line-height: 1.6;
     }
 
-    /* 【kbd タグとは？】
-       キーボードのキーを表すHTMLタグ。
-       <kbd>W</kbd> で「Wキー」という意味。
-       スタイルを付けてキーキャップ風の見た目にする。 */
     kbd {
       background-color: #0f0f23;
       border: 1px solid #444;
@@ -298,34 +314,37 @@
       font-size: 12px;
     }
 
-    /* ===================================================================
-       レスポンシブ対応
-       =================================================================== */
-    /*
-      【@media クエリとは？】
-      画面サイズに応じてスタイルを切り替える仕組み。
-      max-width: 600px → 画面幅が 600px 以下の場合に適用。
-      スマートフォンでの表示を考慮。
-    */
-    @media (max-width: 600px) {
+    /* ===== 3カラムレイアウト ===== */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    /* ===== レスポンシブ ===== */
+    @media (max-width: 768px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
       .dashboard {
-        grid-template-columns: 1fr; /* 1列レイアウトに変更 */
+        grid-template-columns: 1fr;
       }
     }
   </style>
 </head>
 
 <body>
-  <h1>📡 Step 2: 構造化メッセージ</h1>
+  <h1>🤖 Step 3: Adapter パターン</h1>
 
   <!-- 説明テキスト -->
   <div class="help">
-    💡 <strong>Step 2 の新機能:</strong> JSON によるメッセージプロトコル + WASD キーボード操作<br>
-    <kbd>W</kbd> 前進 / <kbd>A</kbd> 左旋回 / <kbd>S</kbd> 後退 / <kbd>D</kbd> 右旋回 / <kbd>Space</kbd> 停止<br>
-    <strong>DevTools（F12）→ Network → WS</strong> で JSON メッセージの中身を確認してみましょう！
+    💡 <strong>Step 3 の新機能:</strong> Adapter パターンでロボットを抽象化 + Docker Compose<br>
+    MockAdapter がセンサーデータ（オドメトリ + バッテリー）をリアルタイム生成。<br>
+    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> でロボットを動かすと、位置が変化します！
   </div>
 
-  <!-- 接続状態 -->
+  <!-- WebSocket 接続状態 -->
   <div class="status">
     <div id="statusDot" class="status-dot"></div>
     <span id="statusText">未接続</span>
@@ -334,56 +353,84 @@
   <!-- コントロールボタン -->
   <div class="controls">
     <button id="btnConnect" class="btn-connect" onclick="connectWebSocket()">
-      🔌 接続
+      🔌 WS接続
     </button>
     <button id="btnDisconnect" class="btn-disconnect" onclick="disconnectWebSocket()" disabled>
-      ❌ 切断
+      ❌ WS切断
+    </button>
+    <span style="color: #444;">|</span>
+    <button id="btnRobotConnect" class="btn-robot-connect" onclick="sendRobotConnect()" disabled>
+      🤖 ロボット接続
+    </button>
+    <button id="btnRobotDisconnect" class="btn-robot-disconnect" onclick="sendRobotDisconnect()" disabled>
+      ⛔ ロボット切断
     </button>
     <button id="btnKeyboard" class="btn-keyboard" onclick="toggleKeyboardControl()" disabled>
       🎮 キーボード OFF
     </button>
   </div>
 
+  <!-- アダプター情報パネル -->
+  <div class="adapter-info">
+    <div class="info-item">
+      <div class="info-label">アダプター</div>
+      <div class="info-value" id="adapterName">--</div>
+    </div>
+    <div class="info-item">
+      <div class="info-label">ロボット状態</div>
+      <div class="info-value" id="robotStatus">🔴 未接続</div>
+    </div>
+    <!-- E-Stop ボタン -->
+    <button id="btnEStop" class="btn-estop" onclick="sendEStop()" disabled title="緊急停止">
+      🛑<br><small>E-STOP</small>
+    </button>
+  </div>
+
   <!-- ===================================================================
-       ダッシュボード: センサーデータ + WASD コントローラー
-       ===================================================================
+       メインダッシュボード: オドメトリ + バッテリー + WASD
+       =================================================================== -->
+  <div class="main-grid">
 
-       【2カラムレイアウト】
-       左: センサーデータ（4枚のカード）
-       右: WASD キーボード表示
-       
-       CSS Grid を使って横並びに配置。
-  -->
-  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0;">
-
-    <!-- 左カラム: センサーデータ -->
+    <!-- 左カラム: オドメトリ（位置・速度） -->
     <div>
-      <h2>📊 センサーデータ</h2>
+      <h2>📍 オドメトリ</h2>
       <div class="dashboard">
-        <!--
-          【センサーカードの構造】
-          各カードは .label（ラベル）と .value（値）で構成。
-          JavaScript（app.js）が .value の textContent を更新することで、
-          リアルタイムにデータが反映される。
+        <div class="sensor-card">
+          <div class="label">X位置</div>
+          <div class="value" id="odomPosX">-- m</div>
+        </div>
+        <div class="sensor-card">
+          <div class="label">Y位置</div>
+          <div class="value" id="odomPosY">-- m</div>
+        </div>
+        <div class="sensor-card">
+          <div class="label">向き (θ)</div>
+          <div class="value" id="odomTheta">--°</div>
+        </div>
+        <div class="sensor-card">
+          <div class="label">速度</div>
+          <div class="value" id="odomSpeed">-- m/s</div>
+        </div>
+      </div>
+    </div>
 
-          id 属性で JavaScript からアクセス:
-          document.getElementById("sensorTemp").textContent = "25.3°C";
-        -->
-        <div class="sensor-card">
-          <div class="label">🌡️ 温度</div>
-          <div class="value" id="sensorTemp">--°C</div>
+    <!-- 中央カラム: バッテリー -->
+    <div>
+      <h2>🔋 バッテリー</h2>
+      <div class="sensor-card" style="padding: 20px;">
+        <div class="value" id="batteryPercent" style="font-size: 40px; margin-bottom: 12px;">--%</div>
+        <div class="battery-bar-container">
+          <div class="battery-bar" id="batteryBar"></div>
         </div>
-        <div class="sensor-card">
-          <div class="label">🔋 バッテリー</div>
-          <div class="value" id="sensorBattery">--%</div>
-        </div>
-        <div class="sensor-card">
-          <div class="label">⚡ 速度</div>
-          <div class="value" id="sensorSpeed">-- m/s</div>
-        </div>
-        <div class="sensor-card">
-          <div class="label">📏 障害物距離</div>
-          <div class="value" id="sensorDistance">-- m</div>
+        <div style="display: flex; justify-content: space-between; margin-top: 12px;">
+          <div>
+            <div class="label">電圧</div>
+            <div style="color: #00d4ff; font-family: monospace;" id="batteryVoltage">--V</div>
+          </div>
+          <div>
+            <div class="label">温度</div>
+            <div style="color: #00d4ff; font-family: monospace;" id="batteryTemp">--°C</div>
+          </div>
         </div>
       </div>
     </div>
@@ -392,16 +439,6 @@
     <div>
       <h2>🎮 キーボード操作</h2>
       <div class="keyboard-panel">
-        <!--
-          【WASD キー表示】
-          CSS Grid で配置:
-            行1: [  ] [W] [  ]  ← W は2列目
-            行2: [A] [S] [D]   ← A,S,D は1,2,3列目
-            行3: [  SPACE  ]   ← 3列全幅
-
-          各キー要素に id を付けて、JavaScript から
-          classList.toggle("active", true/false) でハイライト状態を切り替える。
-        -->
         <div class="wasd-grid">
           <div id="keyW" class="key key-w">W</div>
           <div id="keyA" class="key">A</div>
@@ -419,31 +456,7 @@
   <div id="messages" class="messages"></div>
   <div id="counter" class="counter">送信: 0 | 受信: 0</div>
 
-  <!--
-    =======================================================================
-    JavaScript の読み込み
-    =======================================================================
-
-    【type="module" とは？】
-    <script type="module"> は ES Modules モードで JavaScript を読み込む。
-    通常の <script> との違い:
-      1. import / export が使える
-      2. 変数がグローバルスコープを汚染しない（モジュールスコープ）
-      3. 自動的に defer される（HTML の読み込み完了後に実行）
-      4. strict mode（厳格モード）が自動で有効
-
-    【strict mode とは？】
-    JavaScript の「厳格な」実行モード。
-    - 未宣言の変数への代入がエラーになる（通常モードでは暗黙のグローバル変数に）
-    - 一部の危険な文法が禁止される
-    通常は "use strict"; と書く必要があるが、type="module" では自動で有効。
-
-    【なぜ app.js だけ読み込む？】
-    app.js が import で protocol.js を読み込むため、
-    HTML では app.js だけを指定すればOK。
-    ブラウザが import 文を解析して、依存するファイルも自動的に読み込む。
-    これが ES Modules の「依存解決」機能。
-  -->
+  <!-- JavaScript -->
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>

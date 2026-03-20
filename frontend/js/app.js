@@ -1,53 +1,44 @@
 // =============================================================================
-// Step 2: 構造化メッセージ — app.js（メインアプリケーション）
+// Step 3: Adapter パターン — app.js（メインアプリケーション）
 // =============================================================================
 //
-// 【このファイルの概要】
-// WebSocket 接続の管理、UI 操作、キーボード入力の処理を行うメインモジュール。
-// protocol.js からメッセージ操作関数をインポートして使う。
-//
-// 【import 文とは？】
-// ES Modules で他のファイルから機能を取り込む構文。
-//
-// import { 名前 } from "./ファイルパス.js";
-//   → 指定した名前のエクスポートだけを取り込む（名前付きインポート）
-//
-// 【"./" の意味】
-// 同じディレクトリを指す相対パス。
-// "./protocol.js" = このファイルと同じフォルダの protocol.js
-//
-// 【注意: 拡張子 .js が必須】
-// ブラウザの ES Modules では、import パスに拡張子を省略できない。
-// Node.js では省略できるが、ブラウザでは明示的に .js を付ける必要がある。
+// 【Step 2 からの変更点】
+// 1. adapter_info メッセージへの対応（接続時にロボット情報を受信）
+// 2. 緊急停止（E-Stop）ボタンの処理
+// 3. ロボット接続/切断をUIから操作
+// 4. オドメトリ + バッテリーのセンサー表示
+// 5. Docker 環境対応（WSホスト自動判定）
 //
 // =============================================================================
 import {
   MessageType,
   KeyBindings,
   createVelocityCmd,
+  createEStopCmd,
+  createConnectCmd,
+  createDisconnectCmd,
   encodeMessage,
   decodeMessage,
-  formatSensorData,
+  formatOdomData,
+  formatBatteryData,
 } from "./protocol.js";
 
 // =============================================================================
 // アプリケーション状態
 // =============================================================================
-//
-// 【状態管理とは？】
-// アプリケーションの「現在の状態」を変数で管理すること。
-// React の useState、Vue の ref に近い概念。
-// Step 2 ではシンプルにグローバル変数で管理する。
-//
-// 【let vs const の使い分け】
-// let   — 値が変わる変数（ws は接続/切断で null ↔ WebSocket に変わる）
-// const — 値が変わらない変数（DOM 要素の参照は変わらない）
-let ws = null;           // WebSocket 接続オブジェクト
-let sentCount = 0;       // 送信メッセージ数
-let receivedCount = 0;   // 受信メッセージ数
-let keyboardEnabled = false; // キーボード操作が有効か
+let ws = null;
+let sentCount = 0;
+let receivedCount = 0;
+let keyboardEnabled = false;
 
-const WS_URL = "ws://localhost:8080/ws";
+// 【Docker 環境対応】
+// ブラウザのホスト名に応じて WebSocket 接続先を決定。
+// Docker Compose では frontend が nginx:3000、gateway が gateway:8080 で動く。
+// ブラウザから見ると:
+//   - ローカル開発: ws://localhost:8080/ws
+//   - Docker: ws://localhost:8080/ws（ポートマッピング経由）
+const WS_HOST = window.location.hostname || "localhost";
+const WS_URL = `ws://${WS_HOST}:8080/ws`;
 
 // =============================================================================
 // DOM 要素の取得
@@ -60,18 +51,28 @@ const elements = {
   btnKeyboard: document.getElementById("btnKeyboard"),
   messagesDiv: document.getElementById("messages"),
   counterDiv: document.getElementById("counter"),
-  // センサーデータ表示
-  sensorTemp: document.getElementById("sensorTemp"),
-  sensorBattery: document.getElementById("sensorBattery"),
-  sensorSpeed: document.getElementById("sensorSpeed"),
-  sensorDistance: document.getElementById("sensorDistance"),
+  // Step 3 追加: ロボット関連
+  btnRobotConnect: document.getElementById("btnRobotConnect"),
+  btnRobotDisconnect: document.getElementById("btnRobotDisconnect"),
+  btnEStop: document.getElementById("btnEStop"),
+  robotStatus: document.getElementById("robotStatus"),
+  adapterName: document.getElementById("adapterName"),
+  // Step 3: オドメトリ表示
+  odomPosX: document.getElementById("odomPosX"),
+  odomPosY: document.getElementById("odomPosY"),
+  odomTheta: document.getElementById("odomTheta"),
+  odomSpeed: document.getElementById("odomSpeed"),
+  // Step 3: バッテリー表示
+  batteryPercent: document.getElementById("batteryPercent"),
+  batteryVoltage: document.getElementById("batteryVoltage"),
+  batteryTemp: document.getElementById("batteryTemp"),
+  batteryBar: document.getElementById("batteryBar"),
   // WASD キー表示
   keyW: document.getElementById("keyW"),
   keyA: document.getElementById("keyA"),
   keyS: document.getElementById("keyS"),
   keyD: document.getElementById("keyD"),
   keySpace: document.getElementById("keySpace"),
-  // 最後のコマンド表示
   lastCommand: document.getElementById("lastCommand"),
 };
 
@@ -86,31 +87,21 @@ export function connectWebSocket() {
     setConnectedState(true);
   };
 
-  // --- メッセージ受信時 ---
-  //
-  // 【Step 1 からの変更点】
-  // Step 1: event.data をそのまま表示
-  // Step 2: JSON をデコードして、Type に応じた処理を実行
   ws.onmessage = function (event) {
     receivedCount++;
     updateCounter();
 
-    // JSON 文字列をオブジェクトにデコード
     const msg = decodeMessage(event.data);
     if (!msg) {
       addMessage("⚠️ 不正なメッセージを受信", "system");
       return;
     }
 
-    // メッセージタイプに応じた処理
     handleMessage(msg);
   };
 
   ws.onclose = function (event) {
-    addMessage(
-      `❌ 接続が閉じました（コード: ${event.code}）`,
-      "system"
-    );
+    addMessage(`❌ 接続が閉じました（コード: ${event.code}）`, "system");
     setConnectedState(false);
     ws = null;
   };
@@ -133,12 +124,9 @@ export function disconnectWebSocket() {
 // handleMessage — 受信メッセージを Type に応じて処理
 // =============================================================================
 //
-// 【ディスパッチパターン】
-// Go 側の readPump() の switch 文と対になる処理。
-// サーバーが送信するメッセージタイプ:
-//   - sensor_data  → センサー表示を更新
-//   - command_ack  → コマンド応答をログに表示
-//   - error        → エラーをログに表示
+// 【Step 2 からの変更点】
+// adapter_info メッセージ対応を追加。
+// sensor_data の処理を Adapter 形式に対応。
 function handleMessage(msg) {
   switch (msg.type) {
     case MessageType.SENSOR_DATA:
@@ -153,36 +141,99 @@ function handleMessage(msg) {
       handleError(msg);
       break;
 
+    case MessageType.ADAPTER_INFO:
+      handleAdapterInfo(msg);
+      break;
+
     default:
       addMessage(`⚠️ 不明なメッセージタイプ: ${msg.type}`, "system");
   }
 }
 
 // =============================================================================
-// handleSensorData — センサーデータの受信処理
+// handleAdapterInfo — アダプター情報の受信処理
 // =============================================================================
 //
-// 【Step 1 からの変更点】
-// Step 1: "📊 センサーデータ | 温度: 23.5°C | ..." というテキストを表示
-// Step 2: JSON の各フィールドを個別のUI要素に表示（リアルタイムダッシュボード風）
+// 【Step 3 で新規追加】
+// 接続直後にサーバーからアダプター情報が送られてくる。
+// ロボットの能力を知ることで、UIを適切に設定できる。
+function handleAdapterInfo(msg) {
+  const info = msg.payload;
+  addMessage(`🤖 アダプター: ${info.adapter_name} (接続: ${info.connected})`, "received");
+
+  // アダプター名を表示
+  if (elements.adapterName) {
+    elements.adapterName.textContent = info.adapter_name;
+  }
+
+  // ロボット接続状態を更新
+  setRobotConnected(info.connected);
+
+  // 能力情報をログに表示
+  if (info.capabilities) {
+    const caps = info.capabilities;
+    addMessage(
+      `  速度制御: ${caps.velocity_control ? "✅" : "❌"} | ` +
+      `E-Stop: ${caps.estop ? "✅" : "❌"} | ` +
+      `ナビ: ${caps.navigation ? "✅" : "❌"}`,
+      "system"
+    );
+    if (caps.max_linear) {
+      addMessage(
+        `  速度上限: linear=${caps.max_linear} m/s, angular=${caps.max_angular} rad/s`,
+        "system"
+      );
+    }
+  }
+}
+
+// =============================================================================
+// handleSensorData — センサーデータの受信処理（Step 3 版）
+// =============================================================================
+//
+// 【Step 2 からの変更点】
+// Step 2: 固定的な temperature, battery, speed, distance フィールド
+// Step 3: Adapter の SensorData 形式（payload が map[string]any）
+//
+// msg.payload にはセンサーデータの map がそのまま入っている。
+// data_type フィールドでデータの種類を判別する。
+//
+// ただし、Step 3 の sensorDataToMessage では msg.payload = data.Data なので
+// data_type は msg に直接含まれない。
+// 代わりに payload の内容で判別する。
 function handleSensorData(msg) {
-  const formatted = formatSensorData(msg.payload);
+  const data = msg.payload;
+  if (!data) return;
 
-  // 各センサー値をUIに反映
-  if (elements.sensorTemp) elements.sensorTemp.textContent = formatted.temperature;
-  if (elements.sensorBattery) elements.sensorBattery.textContent = formatted.battery;
-  if (elements.sensorSpeed) elements.sensorSpeed.textContent = formatted.speed;
-  if (elements.sensorDistance) elements.sensorDistance.textContent = formatted.distance;
+  // オドメトリデータの判定: pos_x が含まれている
+  if ("pos_x" in data) {
+    const formatted = formatOdomData(data);
+    if (elements.odomPosX) elements.odomPosX.textContent = formatted.posX;
+    if (elements.odomPosY) elements.odomPosY.textContent = formatted.posY;
+    if (elements.odomTheta) elements.odomTheta.textContent = formatted.theta;
+    if (elements.odomSpeed) elements.odomSpeed.textContent = formatted.speed;
+  }
 
-  // バッテリー残量に応じて色を変える
-  //
-  // 【条件（三項）演算子 ? : とは？】
-  // 条件 ? 真の場合の値 : 偽の場合の値
-  // if-else を1行で書ける。Go にはこの構文がない（if-else を使う）。
-  if (elements.sensorBattery) {
-    const level = msg.payload.battery;
-    elements.sensorBattery.style.color =
-      level > 50 ? "#28a745" : level > 20 ? "#ffc107" : "#dc3545";
+  // バッテリーデータの判定: percentage が含まれている
+  if ("percentage" in data) {
+    const formatted = formatBatteryData(data);
+    if (elements.batteryPercent) elements.batteryPercent.textContent = formatted.percentage;
+    if (elements.batteryVoltage) elements.batteryVoltage.textContent = formatted.voltage;
+    if (elements.batteryTemp) elements.batteryTemp.textContent = formatted.temperature;
+
+    // バッテリーバーの更新
+    const pct = data.percentage || 0;
+    if (elements.batteryBar) {
+      elements.batteryBar.style.width = `${pct}%`;
+      // 残量に応じて色を変える
+      if (pct > 50) {
+        elements.batteryBar.style.backgroundColor = "#28a745";
+      } else if (pct > 20) {
+        elements.batteryBar.style.backgroundColor = "#ffc107";
+      } else {
+        elements.batteryBar.style.backgroundColor = "#dc3545";
+      }
+    }
   }
 }
 
@@ -191,14 +242,16 @@ function handleSensorData(msg) {
 // =============================================================================
 function handleCommandAck(msg) {
   const { status, description } = msg.payload;
-  //
-  // 【分割代入（Destructuring）とは？】
-  // オブジェクトからプロパティを取り出して変数に代入する構文。
-  // const { status, description } = msg.payload;
-  // ↓ これと同じ
-  // const status = msg.payload.status;
-  // const description = msg.payload.description;
   addMessage(`🤖 [${status}] ${description}`, "received");
+
+  // ロボット接続/切断に応じてUIを更新
+  if (status === "connected") {
+    setRobotConnected(true);
+  } else if (status === "disconnected") {
+    setRobotConnected(false);
+  } else if (status === "stopped") {
+    addMessage("🚨 緊急停止が実行されました", "system");
+  }
 }
 
 // =============================================================================
@@ -212,16 +265,6 @@ function handleError(msg) {
 // =============================================================================
 // sendVelocityCmd — 速度コマンドを送信
 // =============================================================================
-//
-// 【コマンド送信の流れ】
-// 1. createVelocityCmd() で構造化メッセージを作成
-// 2. encodeMessage() で JSON 文字列に変換
-// 3. ws.send() で WebSocket 経由で送信
-//
-// この3段階は Go 側の sendMessage() と対称的:
-// 1. protocol.NewVelocityCmd() でメッセージ作成
-// 2. codec.Encode() でバイト列に変換
-// 3. conn.WriteMessage() で送信
 export function sendVelocityCmd(linearX, linearY, angularZ) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -234,21 +277,53 @@ export function sendVelocityCmd(linearX, linearY, angularZ) {
 }
 
 // =============================================================================
-// キーボード入力の処理
+// sendEStop — 緊急停止コマンドを送信
 // =============================================================================
 //
-// 【WASD キーボード操作】
-// ゲームでよく使われる WASD 配置でロボットを操作する。
-// W = 前進、A = 左旋回、S = 後退、D = 右旋回、Space = 停止
-//
-// 【keydown と keyup イベント】
-// keydown: キーが「押された」瞬間に発火
-// keyup:   キーが「離された」瞬間に発火
-//
-// ここでは keydown でコマンドを送信する。
-// 将来的には keyup で停止コマンドを送る実装も考えられる。
+// 【緊急停止（E-Stop）とは？】
+// ロボットを即座に停止させるための安全機能。
+// 実際のロボットにはハードウェアのE-Stopボタンがある。
+// このソフトウェア版は、WebSocket 経由でサーバーに停止命令を送る。
+export function sendEStop() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    addMessage("⚠️ サーバー未接続です", "system");
+    return;
+  }
 
-// toggleKeyboardControl — キーボード操作の ON/OFF を切り替え
+  const msg = createEStopCmd();
+  const json = encodeMessage(msg);
+  ws.send(json);
+
+  sentCount++;
+  updateCounter();
+  addMessage("🚨 緊急停止コマンドを送信しました", "sent");
+}
+
+// =============================================================================
+// sendRobotConnect / sendRobotDisconnect — ロボット接続管理
+// =============================================================================
+export function sendRobotConnect() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+  const msg = createConnectCmd();
+  ws.send(encodeMessage(msg));
+  sentCount++;
+  updateCounter();
+}
+
+export function sendRobotDisconnect() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+  const msg = createDisconnectCmd();
+  ws.send(encodeMessage(msg));
+  sentCount++;
+  updateCounter();
+}
+
+// =============================================================================
+// キーボード入力の処理（Step 2 と共通）
+// =============================================================================
+
 export function toggleKeyboardControl() {
   keyboardEnabled = !keyboardEnabled;
 
@@ -267,60 +342,31 @@ export function toggleKeyboardControl() {
   );
 }
 
-// handleKeyDown — キーボードのキー押下を処理
-//
-// 【event.key とは？】
-// 押されたキーの名前を表す文字列。
-// "w", "a", "s", "d", " "（スペース）など。
-// 大文字 "W" と小文字 "w" は区別される → .toLowerCase() で統一。
-//
-// 【event.repeat とは？】
-// キーを押しっぱなしにすると、keydown イベントが連続で発火する。
-// repeat が true の場合は押しっぱなしによるリピート。
-// リピートの度にコマンドを送ると通信が多すぎるため、無視する。
 function handleKeyDown(event) {
   if (!keyboardEnabled) return;
-  if (event.repeat) return; // キーリピートを無視
+  if (event.repeat) return;
 
   const key = event.key.toLowerCase();
   const binding = KeyBindings.get(key);
 
   if (binding) {
-    // 対応する速度コマンドを送信
     sendVelocityCmd(binding.linearX, binding.linearY, binding.angularZ);
-
-    // 押されたキーをUIでハイライト表示
     highlightKey(key, true);
-
-    // 最後のコマンドを表示
     if (elements.lastCommand) {
       elements.lastCommand.textContent = binding.label;
     }
-
-    // デフォルト動作を防止（スペースキーでページがスクロールするのを防ぐ）
-    // 【preventDefault() とは？】
-    // ブラウザのデフォルト動作を無効化する関数。
-    // スペースキーのデフォルト動作 = ページの下スクロール
-    // これを防がないと、操作するたびにページがスクロールしてしまう。
     event.preventDefault();
   }
 }
 
-// handleKeyUp — キーが離された時の処理
 function handleKeyUp(event) {
   if (!keyboardEnabled) return;
-
   const key = event.key.toLowerCase();
   if (KeyBindings.has(key)) {
     highlightKey(key, false);
   }
 }
 
-// highlightKey — WASD キーのUIハイライト
-//
-// 【キーとDOM要素の対応】
-// "w" → elements.keyW, "a" → elements.keyA, ...
-// キー名からDOM要素を引く辞書（オブジェクト）を使う。
 function highlightKey(key, active) {
   const keyMap = {
     w: elements.keyW,
@@ -329,7 +375,6 @@ function highlightKey(key, active) {
     d: elements.keyD,
     " ": elements.keySpace,
   };
-
   const el = keyMap[key];
   if (el) {
     el.classList.toggle("active", active);
@@ -340,29 +385,20 @@ function highlightKey(key, active) {
 // UI ヘルパー関数
 // =============================================================================
 
-// addMessage — メッセージをログに追加
 function addMessage(text, type) {
   const div = document.createElement("div");
   div.classList.add("message", type);
-
   const time = new Date().toLocaleTimeString();
   div.innerHTML = `<span class="timestamp">[${time}]</span> ${text}`;
-
   elements.messagesDiv.appendChild(div);
   elements.messagesDiv.scrollTop = elements.messagesDiv.scrollHeight;
 
-  // メッセージが多くなりすぎたら古いものを削除
-  //
-  // 【なぜ削除するの？】
-  // DOM要素が増え続けると、メモリを消費しブラウザが重くなる。
-  // 200件を超えたら古いものから削除して、パフォーマンスを維持する。
   const MAX_MESSAGES = 200;
   while (elements.messagesDiv.children.length > MAX_MESSAGES) {
     elements.messagesDiv.removeChild(elements.messagesDiv.firstChild);
   }
 }
 
-// setConnectedState — UI の接続状態を更新
 function setConnectedState(connected) {
   if (connected) {
     elements.statusDot.classList.add("connected");
@@ -370,12 +406,18 @@ function setConnectedState(connected) {
     elements.btnConnect.disabled = true;
     elements.btnDisconnect.disabled = false;
     if (elements.btnKeyboard) elements.btnKeyboard.disabled = false;
+    if (elements.btnRobotConnect) elements.btnRobotConnect.disabled = false;
+    if (elements.btnRobotDisconnect) elements.btnRobotDisconnect.disabled = false;
+    if (elements.btnEStop) elements.btnEStop.disabled = false;
   } else {
     elements.statusDot.classList.remove("connected");
     elements.statusText.textContent = "未接続";
     elements.btnConnect.disabled = false;
     elements.btnDisconnect.disabled = true;
     if (elements.btnKeyboard) elements.btnKeyboard.disabled = true;
+    if (elements.btnRobotConnect) elements.btnRobotConnect.disabled = true;
+    if (elements.btnRobotDisconnect) elements.btnRobotDisconnect.disabled = true;
+    if (elements.btnEStop) elements.btnEStop.disabled = true;
     keyboardEnabled = false;
     if (elements.btnKeyboard) {
       elements.btnKeyboard.textContent = "🎮 キーボード OFF";
@@ -384,7 +426,14 @@ function setConnectedState(connected) {
   }
 }
 
-// updateCounter — カウンター表示を更新
+// setRobotConnected — ロボット接続状態のUI更新
+function setRobotConnected(connected) {
+  if (elements.robotStatus) {
+    elements.robotStatus.textContent = connected ? "🟢 接続中" : "🔴 未接続";
+    elements.robotStatus.style.color = connected ? "#28a745" : "#dc3545";
+  }
+}
+
 function updateCounter() {
   elements.counterDiv.textContent = `送信: ${sentCount} | 受信: ${receivedCount}`;
 }
@@ -392,33 +441,15 @@ function updateCounter() {
 // =============================================================================
 // イベントリスナーの登録
 // =============================================================================
-//
-// 【addEventListener とは？】
-// DOM要素にイベント（クリック、キー入力など）の処理を登録する関数。
-// onclick="..." よりも推奨される方法:
-// - 複数のリスナーを登録できる
-// - HTMLとJSの分離（関心の分離）
-// - removeEventListener で解除できる
-//
-// 【document にリスナーを付ける理由】
-// キーボードイベントはページ全体で検知したいので、
-// 特定のinput要素ではなく document に登録する。
 document.addEventListener("keydown", handleKeyDown);
 document.addEventListener("keyup", handleKeyUp);
 
 // =============================================================================
-// グローバルに公開（HTMLのonclickから呼び出せるようにする）
+// グローバルに公開（HTML の onclick から呼び出し用）
 // =============================================================================
-//
-// 【window オブジェクトとは？】
-// ブラウザの最上位オブジェクト。グローバルスコープに相当。
-// ES Modules 内の関数はデフォルトでモジュールスコープに閉じている。
-// HTML の onclick="connectWebSocket()" から呼ぶには、
-// window.connectWebSocket = connectWebSocket; としてグローバルに公開する必要がある。
-//
-// 【より良い方法】
-// onclick 属性の代わりに addEventListener を使うべき（Step 9 の React ではそうなる）。
-// ここでは HTML の構造をシンプルに保つため、この方法を使う。
 window.connectWebSocket = connectWebSocket;
 window.disconnectWebSocket = disconnectWebSocket;
 window.toggleKeyboardControl = toggleKeyboardControl;
+window.sendEStop = sendEStop;
+window.sendRobotConnect = sendRobotConnect;
+window.sendRobotDisconnect = sendRobotDisconnect;

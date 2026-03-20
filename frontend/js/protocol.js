@@ -1,204 +1,104 @@
 // =============================================================================
-// Step 2: 構造化メッセージ — protocol.js（メッセージの組み立て・解析）
+// Step 3: Adapter パターン — protocol.js
 // =============================================================================
 //
-// 【このファイルの概要】
-// WebSocket で送受信する JSON メッセージの組み立てと解析を行うモジュール。
-// Go 側の protocol パッケージ（messages.go, codec.go）と対になる JavaScript 版。
-//
-// 【ES Modules とは？】
-// JavaScript でコードをファイルに分割し、必要な部分だけ取り込む仕組み。
-// - export: 他のファイルに公開する（このファイルで使う）
-// - import: 他のファイルから取り込む（app.js で使う）
-//
-// <script type="module"> で読み込むと ES Modules が有効になる。
-// 通常の <script> では export/import が使えない。
-//
-// 【なぜファイルを分けるの？（Step 1 からの進化）】
-// Step 1 では全てを index.html の <script> タグに書いていました。
-// Step 2 ではファイルを分割して「関心の分離（Separation of Concerns）」を実現。
-//
-// protocol.js — メッセージの構造に関するコード
-// app.js      — UI操作やWebSocket接続に関するコード
-//
-// ファイルを分けるメリット:
-// 1. 各ファイルの役割が明確になる
-// 2. 変更の影響範囲が小さくなる（protocol を変えても UI コードに影響しない）
-// 3. テストがしやすくなる
+// 【Step 2 からの変更点】
+// 1. adapter_info メッセージタイプを追加
+// 2. estop / connect / disconnect メッセージ作成関数を追加
+// 3. formatSensorData を Adapter 形式に対応
 //
 // =============================================================================
+import {
+  MessageType as Step2Types,
+  KeyBindings,
+  createVelocityCmd,
+  encodeMessage,
+  decodeMessage,
+} from "./protocol-base.js";
 
 // =============================================================================
-// メッセージタイプ定数
+// メッセージタイプ定数（Step 3 で追加分を含む）
 // =============================================================================
 //
-// 【Object.freeze() とは？】
-// オブジェクトを「凍結」して、後から変更できなくする。
-// Go の const に近い効果を持つ。
-//
-// 普通のオブジェクト: MessageType.VELOCITY_CMD = "hacked" → 変更できてしまう
-// freeze したもの:    MessageType.VELOCITY_CMD = "hacked" → 無視される（変更されない）
-//
-// 【なぜ定数にするの？】
-// "velocity_cmd" という文字列を直接使うと:
-// - タイプミスに気づけない（"velociy_cmd" → バグ）
-// - IDE の補完が効かない
-// - 文字列を変更する時に全箇所を修正する必要がある
+// 【スプレッド構文 ...obj とは？】
+// オブジェクトの全プロパティを展開して新しいオブジェクトに入れる。
+// { ...Step2Types } → Step2Types の全プロパティをコピー。
+// そこに新しいプロパティを追加して拡張する。
 export const MessageType = Object.freeze({
-  VELOCITY_CMD: "velocity_cmd",   // クライアント → サーバー: 速度コマンド
-  SENSOR_DATA: "sensor_data",     // サーバー → クライアント: センサーデータ
-  COMMAND_ACK: "command_ack",     // サーバー → クライアント: コマンド応答
-  ERROR: "error",                 // サーバー → クライアント: エラー
+  ...Step2Types,
+  ADAPTER_INFO: "adapter_info",   // サーバー → クライアント: アダプター情報
+  ESTOP: "estop",                 // クライアント → サーバー: 緊急停止
+  CONNECT: "connect",             // クライアント → サーバー: ロボット接続
+  DISCONNECT: "disconnect",       // クライアント → サーバー: ロボット切断
 });
 
 // =============================================================================
-// デフォルト設定
+// createEStopCmd — 緊急停止コマンドを作成
 // =============================================================================
-const DEFAULT_ROBOT_ID = "robot-01";
-
-// =============================================================================
-// createVelocityCmd — velocity_cmd メッセージを作成
-// =============================================================================
-//
-// 【関数の設計思想】
-// Go 側の protocol.NewVelocityCmd() と同じ構造のメッセージを作る。
-// クライアントとサーバーで同じメッセージ構造を使うことで、
-// 双方のコードが対称的になり、理解しやすくなる。
-//
-// 【デフォルト引数（= 値）とは？】
-// 関数呼び出し時に引数を省略した場合に使われる値。
-// createVelocityCmd(0.5) → linearY は 0, angularZ は 0 になる。
-// Python のデフォルト引数、Go の ... に似た概念。
-//
-// 【引数の意味】
-// linearX  — 前後方向の速度 (正: 前進, 負: 後退)
-// linearY  — 左右方向の速度 (正: 左, 負: 右)
-// angularZ — 回転速度 (正: 左旋回, 負: 右旋回)
-export function createVelocityCmd(linearX = 0, linearY = 0, angularZ = 0) {
+export function createEStopCmd() {
   return {
-    type: MessageType.VELOCITY_CMD,
-    robot_id: DEFAULT_ROBOT_ID,
+    type: MessageType.ESTOP,
+    robot_id: "robot-01",
     timestamp: new Date().toISOString(),
-    payload: {
-      linear_x: linearX,
-      linear_y: linearY,
-      angular_z: angularZ,
-    },
+    payload: {},
   };
 }
 
 // =============================================================================
-// encodeMessage — メッセージを JSON 文字列に変換（エンコード）
+// createConnectCmd — ロボット接続コマンドを作成
 // =============================================================================
-//
-// 【JSON.stringify() とは？】
-// JavaScript のオブジェクトを JSON 文字列に変換する関数。
-// Go の json.Marshal() に相当。
-//
-// 例:
-//   const obj = { type: "velocity_cmd", payload: { linear_x: 0.5 } };
-//   JSON.stringify(obj)
-//   → '{"type":"velocity_cmd","payload":{"linear_x":0.5}}'
-//
-// 第2引数: replacer（変換フィルター）— null で全フィールド
-// 第3引数: space（インデント）— 省略すると1行、2 にすると見やすく整形
-export function encodeMessage(msg) {
-  return JSON.stringify(msg);
-}
-
-// =============================================================================
-// decodeMessage — JSON 文字列をメッセージオブジェクトに変換（デコード）
-// =============================================================================
-//
-// 【JSON.parse() とは？】
-// JSON 文字列を JavaScript のオブジェクトに変換する関数。
-// Go の json.Unmarshal() に相当。
-//
-// 【try-catch とは？】
-// エラーが発生する可能性のあるコードを安全に実行する構文。
-// Go の if err != nil パターンに相当。
-//
-// try {
-//   // エラーが起きるかもしれないコード
-// } catch (error) {
-//   // エラーが起きた時の処理
-// }
-//
-// 【なぜ try-catch が必要？】
-// JSON.parse() に不正な文字列を渡すと例外（SyntaxError）が発生する。
-// 例: JSON.parse("not json") → SyntaxError
-// try-catch で囲まないと、プログラムがクラッシュ（停止）する。
-export function decodeMessage(jsonString) {
-  try {
-    const msg = JSON.parse(jsonString);
-
-    // --- バリデーション（検証） ---
-    // 受信したデータが正しい形式かチェックする。
-    //
-    // 【なぜバリデーションが必要？】
-    // ネットワークから来るデータは信頼できない。
-    // 不正なデータがアプリに影響しないよう、入口でチェックする。
-    // これを「入力バリデーション」と呼ぶ。
-    if (!msg.type) {
-      console.warn("⚠️ メッセージに type フィールドがありません:", msg);
-      return null;
-    }
-
-    return msg;
-  } catch (error) {
-    console.error("JSON パースエラー:", error.message);
-    return null;
-  }
-}
-
-// =============================================================================
-// formatSensorData — センサーデータを表示用文字列に変換
-// =============================================================================
-//
-// 【テンプレートリテラル `...` 】
-// バッククォート(`)で囲むと ${式} で値を埋め込める。
-// 通常の '...' や "..." では変数を埋め込めない。
-//
-// 【.toFixed(n) とは？】
-// 数値を小数点以下n桁の文字列に変換するメソッド。
-// Go の fmt.Sprintf("%.1f", value) に相当。
-// 例: (23.456).toFixed(1) → "23.5"
-export function formatSensorData(payload) {
+export function createConnectCmd() {
   return {
-    temperature: `${payload.temperature.toFixed(1)}°C`,
-    battery: `${payload.battery.toFixed(0)}%`,
-    speed: `${payload.speed.toFixed(2)} m/s`,
-    distance: `${payload.distance.toFixed(1)} m`,
+    type: MessageType.CONNECT,
+    robot_id: "robot-01",
+    timestamp: new Date().toISOString(),
+    payload: {},
   };
 }
 
 // =============================================================================
-// WASD キーマッピング
+// createDisconnectCmd — ロボット切断コマンドを作成
+// =============================================================================
+export function createDisconnectCmd() {
+  return {
+    type: MessageType.DISCONNECT,
+    robot_id: "robot-01",
+    timestamp: new Date().toISOString(),
+    payload: {},
+  };
+}
+
+// =============================================================================
+// formatOdomData — オドメトリデータを表示用に変換
 // =============================================================================
 //
-// 【キーマッピングとは？】
-// キーボードのキーとロボットの動作を対応付けるテーブル。
-// ゲームでよく使われる WASD 配置:
+// 【Step 3 のセンサーデータ形式】
+// MockAdapter は adapter.SensorData を送信し、server の sensorDataToMessage で
+// protocol.Message に変換される。Payload は map[string]any（= JS のオブジェクト）。
 //
-//          W (前進)
-//          ▲
-//    A ◄  S  ► D
-//   (左)  ▼  (右)
-//       (後退)
+// /odom トピック:
+//   { pos_x, pos_y, theta, linear_x, angular_z, speed }
 //
-// 【Map オブジェクトとは？】
-// キーと値のペアを格納するデータ構造。
-// 通常のオブジェクト {} と似ているが、以下の利点がある:
-// - キーに任意の型を使える（オブジェクトは文字列のみ）
-// - .size プロパティでエントリ数を取得できる
-// - イテレーション（繰り返し処理）が簡単
-// ここではシンプルなので通常のオブジェクトでも良いが、
-// Map を使う練習として採用。
-export const KeyBindings = new Map([
-  // [キー名, { 速度パラメータ, 表示名 }]
-  ["w", { linearX: 0.5, linearY: 0, angularZ: 0, label: "⬆ 前進" }],
-  ["s", { linearX: -0.5, linearY: 0, angularZ: 0, label: "⬇ 後退" }],
-  ["a", { linearX: 0, linearY: 0, angularZ: 0.5, label: "↺ 左旋回" }],
-  ["d", { linearX: 0, linearY: 0, angularZ: -0.5, label: "↻ 右旋回" }],
-  [" ", { linearX: 0, linearY: 0, angularZ: 0, label: "⏹ 停止" }],  // スペースキー
-]);
+// /battery トピック:
+//   { percentage, voltage, temperature }
+export function formatOdomData(data) {
+  return {
+    posX: `${(data.pos_x || 0).toFixed(2)} m`,
+    posY: `${(data.pos_y || 0).toFixed(2)} m`,
+    theta: `${((data.theta || 0) * 180 / Math.PI).toFixed(1)}°`,
+    speed: `${(data.speed || 0).toFixed(2)} m/s`,
+    linearX: `${(data.linear_x || 0).toFixed(2)} m/s`,
+    angularZ: `${(data.angular_z || 0).toFixed(2)} rad/s`,
+  };
+}
+
+export function formatBatteryData(data) {
+  return {
+    percentage: `${(data.percentage || 0).toFixed(0)}%`,
+    voltage: `${(data.voltage || 0).toFixed(1)}V`,
+    temperature: `${(data.temperature || 0).toFixed(1)}°C`,
+  };
+}
+
+// Step 2 の関数を再エクスポート
+export { KeyBindings, createVelocityCmd, encodeMessage, decodeMessage };

@@ -11,7 +11,9 @@
 // テキスト文字列だけでは、メッセージの意味をプログラムが判断しにくい。
 // 例: "forward" が移動コマンドなのか、チャットメッセージなのか区別できない。
 // 構造化すると:
-//   { "type": "velocity_cmd", "payload": { "linear_x": 0.5 } }
+//
+//	{ "type": "velocity_cmd", "payload": { "linear_x": 0.5 } }
+//
 // → 「移動コマンドで、前に 0.5 m/s」と明確になる。
 //
 // 【パッケージとは？】
@@ -81,10 +83,10 @@ const (
 // 最初は生のJSONバイト列として受け取り、Type を見てから適切な型にデコードする。
 // これを「遅延デコード（lazy decoding）」と呼ぶ。
 type Message struct {
-	Type      MessageType `json:"type"`                // メッセージの種類
-	RobotID   string      `json:"robot_id,omitempty"`  // ロボットの識別子
-	Timestamp time.Time   `json:"timestamp"`           // メッセージの送信時刻
-	Payload   interface{} `json:"payload"`             // メッセージ本体（型はTypeによって異なる）
+	Type      MessageType `json:"type"`               // メッセージの種類
+	RobotID   string      `json:"robot_id,omitempty"` // ロボットの識別子
+	Timestamp time.Time   `json:"timestamp"`          // メッセージの送信時刻
+	Payload   interface{} `json:"payload"`            // メッセージ本体（型はTypeによって異なる）
 }
 
 // =============================================================================
@@ -95,19 +97,19 @@ type Message struct {
 // ロボットの動きは以下の3軸で表現します。
 // これは ROS (Robot Operating System) の geometry_msgs/Twist に対応しています。
 //
-//    LinearX  (前後)    : 正 = 前進、負 = 後退     単位: m/s
-//    LinearY  (左右)    : 正 = 左、負 = 右          単位: m/s
-//    AngularZ (回転)    : 正 = 左旋回、負 = 右旋回  単位: rad/s
+//	LinearX  (前後)    : 正 = 前進、負 = 後退     単位: m/s
+//	LinearY  (左右)    : 正 = 左、負 = 右          単位: m/s
+//	AngularZ (回転)    : 正 = 左旋回、負 = 右旋回  単位: rad/s
 //
-//         前進 (+X)
-//           ▲
-//           |
-//    左(+Y) ← → 右(-Y)
-//           |
-//           ▼
-//         後退 (-X)
+//	     前進 (+X)
+//	       ▲
+//	       |
+//	左(+Y) ← → 右(-Y)
+//	       |
+//	       ▼
+//	     後退 (-X)
 //
-//    左旋回(+Z) ↺    ↻ 右旋回(-Z)
+//	左旋回(+Z) ↺    ↻ 右旋回(-Z)
 type VelocityPayload struct {
 	LinearX  float64 `json:"linear_x"`  // 前後方向の速度 (m/s)
 	LinearY  float64 `json:"linear_y"`  // 左右方向の速度 (m/s)
@@ -138,13 +140,14 @@ type SensorPayload struct {
 // 【コマンド応答の意味】
 // ロボットにコマンドを送った後、そのコマンドがどうなったか知る必要がある。
 // Status のパターン:
-//   "received"   — サーバーがコマンドを受け取った
-//   "executing"  — コマンド実行中
-//   "completed"  — コマンド完了
-//   "rejected"   — コマンドを拒否した（安全制限など）
+//
+//	"received"   — サーバーがコマンドを受け取った
+//	"executing"  — コマンド実行中
+//	"completed"  — コマンド完了
+//	"rejected"   — コマンドを拒否した（安全制限など）
 type CommandAckPayload struct {
-	Status      string `json:"status"`                 // 処理状態
-	Description string `json:"description,omitempty"`  // 状態の説明
+	Status      string `json:"status"`                // 処理状態
+	Description string `json:"description,omitempty"` // 状態の説明
 }
 
 // =============================================================================

@@ -10,8 +10,8 @@
 // プログラム内のデータ（構造体やオブジェクト）を、
 // ネットワークで送信できるバイト列に変換すること。
 //
-//   Go の構造体 → JSON 文字列（エンコード / マーシャリング）
-//   JSON 文字列 → Go の構造体（デコード / アンマーシャリング）
+//	Go の構造体 → JSON 文字列（エンコード / マーシャリング）
+//	JSON 文字列 → Go の構造体（デコード / アンマーシャリング）
 //
 // 【JSON vs MessagePack】
 // ┌──────────────┬───────────────────────────────────────┐
@@ -47,7 +47,8 @@ import (
 //
 // なぜインターフェースにするのか？
 // → 将来 MessagePack に切り替えても、このインターフェースを満たせばOK。
-//   呼び出し側のコードを変更する必要がない（= 依存関係の逆転）。
+//
+//	呼び出し側のコードを変更する必要がない（= 依存関係の逆転）。
 //
 // 【Go のインターフェースの特徴】
 // Java と違い、「implements」キーワードは不要。
@@ -91,9 +92,10 @@ func NewJSONCodec() Codec {
 // JavaScript の JSON.stringify() に相当。
 //
 // 例:
-//   msg := Message{Type: "velocity_cmd", Payload: VelocityPayload{LinearX: 0.5}}
-//   bytes, _ := json.Marshal(msg)
-//   // → {"type":"velocity_cmd","payload":{"linear_x":0.5}}
+//
+//	msg := Message{Type: "velocity_cmd", Payload: VelocityPayload{LinearX: 0.5}}
+//	bytes, _ := json.Marshal(msg)
+//	// → {"type":"velocity_cmd","payload":{"linear_x":0.5}}
 //
 // 【多値戻り値 ([]byte, error)】
 // Go では「結果」と「エラー」を同時に返すのが慣例。
