@@ -1,0 +1,357 @@
+/* =============================================================================
+   Step 4: センサー可視化 — スタイルシート
+   =============================================================================
+
+   【Step 3 からの変更点】
+   Step 3: index.html の <style> タグ内にすべてのCSSを記述
+   Step 4: 外部CSSファイルに分離 → HTML がすっきりする
+
+   【CSSファイル分離のメリット】
+   1. ブラウザがCSSファイルをキャッシュ → ページ読み込みが速くなる
+   2. HTMLとCSSの責任が分離 → 保守しやすくなる
+   3. 複数ページからCSSを再利用できる
+   ============================================================================= */
+
+/* ===== リセット & 基本スタイル ===== */
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 16px;
+  background-color: #1a1a2e;
+  color: #e0e0e0;
+  min-height: 100vh;
+}
+
+h1 { color: #00d4ff; border-bottom: 2px solid #00d4ff; padding-bottom: 10px; font-size: 1.4em; margin: 0 0 16px; }
+h2 { color: #00d4ff; font-size: 1.05em; margin: 12px 0 6px; }
+
+/* ===== 接続状態バー ===== */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background-color: #16213e;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.status-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background-color: #dc3545;
+  transition: background-color 0.3s;
+}
+.status-dot.connected { background-color: #28a745; }
+
+/* ===== ボタン ===== */
+button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  transition: opacity 0.2s;
+}
+button:hover { opacity: 0.85; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-connect { background-color: #28a745; color: white; }
+.btn-disconnect { background-color: #dc3545; color: white; }
+.btn-keyboard {
+  background-color: #16213e;
+  color: #ffd700;
+  border: 1px solid #ffd700;
+}
+.btn-keyboard.active {
+  background-color: #ffd700;
+  color: #1a1a2e;
+}
+
+/* ===== E-Stop ===== */
+.btn-estop {
+  background-color: #dc3545;
+  color: white;
+  font-size: 14px;
+  padding: 12px 20px;
+  border-radius: 50%;
+  border: 3px solid #ff6b6b;
+  box-shadow: 0 0 15px rgba(220, 53, 69, 0.3);
+  min-width: 64px;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.btn-estop:hover:not(:disabled) {
+  background-color: #ff1a1a;
+  box-shadow: 0 0 25px rgba(220, 53, 69, 0.6);
+  transform: scale(1.05);
+}
+
+.btn-robot-connect { background-color: #17a2b8; color: white; }
+.btn-robot-disconnect { background-color: #6c757d; color: white; }
+
+.controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ===== メインダッシュボードグリッド ===== */
+/*
+  【CSS Grid で複雑なレイアウトを組む】
+  センサーをタイル状に自動配置する。
+  auto-fill + minmax で、画面幅に応じて列数が自動調整される。
+  
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr))
+    → 最小 280px、最大で均等分配。画面が広ければ3列、狭ければ1列。
+*/
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* ===== センサーカード（各センサーの共通コンテナ） ===== */
+.sensor-card {
+  background-color: #16213e;
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid #2a2a4e;
+  overflow: hidden;
+}
+
+.sensor-card .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.sensor-card .card-title {
+  font-size: 13px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.sensor-card .card-freq {
+  font-size: 11px;
+  color: #555;
+}
+
+/* ===== Canvas コンテナ ===== */
+/*
+  【canvas の応答性】
+  canvas 要素はCSSの width/height と、属性の width/height が別物。
+  CSS = 表示サイズ、属性 = 描画解像度。
+  ここではCSS で100%にして、JS 側で解像度を合わせる。
+*/
+.canvas-container {
+  width: 100%;
+  position: relative;
+}
+
+.canvas-container canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 4px;
+}
+
+/* ===== 値表示カード（オドメトリ用小カード） ===== */
+.value-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.value-item {
+  text-align: center;
+  background-color: #0f0f23;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.value-item .label {
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.value-item .value {
+  font-size: 18px;
+  font-weight: bold;
+  color: #00d4ff;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+/* ===== バッテリーバー ===== */
+.battery-bar-container {
+  width: 100%;
+  height: 16px;
+  background-color: #0f0f23;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #333;
+}
+
+.battery-bar {
+  height: 100%;
+  background-color: #28a745;
+  border-radius: 8px;
+  transition: width 0.5s ease, background-color 0.5s ease;
+  width: 0%;
+}
+
+.battery-value {
+  font-size: 32px;
+  font-weight: bold;
+  color: #00d4ff;
+  font-family: 'Cascadia Code', monospace;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.battery-details {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.battery-details .label { color: #888; }
+.battery-details .value { color: #00d4ff; font-family: monospace; }
+
+/* ===== WASD キーボード ===== */
+.keyboard-panel {
+  background-color: #0f0f23;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.wasd-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 48px);
+  gap: 4px;
+  justify-content: center;
+  margin: 8px 0;
+}
+
+.key {
+  width: 48px;
+  height: 48px;
+  background-color: #1a1a2e;
+  border: 2px solid #444;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: monospace;
+  font-size: 16px;
+  font-weight: bold;
+  color: #888;
+  transition: all 0.1s ease;
+  user-select: none;
+}
+
+.key.active {
+  background-color: #00d4ff;
+  border-color: #00d4ff;
+  color: #1a1a2e;
+  transform: scale(0.95);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+}
+
+.key-w { grid-column: 2; }
+.key-space {
+  grid-column: 1 / 4;
+  width: auto;
+  font-size: 12px;
+}
+
+.last-command {
+  text-align: center;
+  color: #ffd700;
+  font-size: 12px;
+  margin-top: 6px;
+  min-height: 1.2em;
+}
+
+/* ===== アダプター情報 ===== */
+.adapter-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #16213e;
+  border: 1px solid #2a2a4e;
+  border-radius: 8px;
+  padding: 8px 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.adapter-bar .info-item { text-align: center; }
+.adapter-bar .info-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+.adapter-bar .info-value { font-size: 14px; font-weight: bold; color: #ffd700; }
+
+/* ===== メッセージログ ===== */
+.messages-section { margin-top: 12px; }
+
+.messages {
+  background-color: #0f0f23;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 150px;
+  overflow-y: auto;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+.message { padding: 2px 0; border-bottom: 1px solid #1a1a3e; word-break: break-all; }
+.message.sent { color: #ffd700; }
+.message.received { color: #00d4ff; }
+.message.system { color: #888; font-style: italic; }
+.timestamp { color: #666; font-size: 10px; }
+.counter { color: #888; font-size: 12px; margin-top: 4px; }
+
+/* ===== ヘルプ ===== */
+.help {
+  background-color: #16213e;
+  border-left: 4px solid #00d4ff;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 0 8px 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+kbd {
+  background-color: #0f0f23;
+  border: 1px solid #444;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+/* ===== レスポンシブ ===== */
+@media (max-width: 600px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}

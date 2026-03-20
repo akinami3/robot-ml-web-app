@@ -1,356 +1,69 @@
 <!DOCTYPE html>
 <!--
   =============================================================================
-  Step 3: Adapter パターン — フロントエンド
+  Step 4: センサー可視化ダッシュボード
   =============================================================================
 
-  【Step 2 からの変更点】
-  1. ロボット接続/切断ボタンの追加
-  2. 緊急停止（E-Stop）ボタンの追加（大きな赤いボタン）
-  3. オドメトリ表示（位置・速度）
-  4. バッテリー表示（残量バー + 電圧 + 温度）
-  5. アダプター情報の表示
-  6. protocol.js を protocol-base.js にリネームし、拡張版 protocol.js を使用
+  【Step 3 からの変更点】
+  1. CSS を外部ファイルに分離（css/style.css）
+  2. WebSocketClient クラスで接続管理を抽象化
+  3. LiDAR データの Canvas 2D による極座標プロット
+  4. IMU データのリングバッファ式リアルタイムチャート
+  5. バッテリーゲージを SVG 円形ゲージに変更
+  6. オドメトリにミニマップ（軌跡描画）を追加
+  7. ダッシュボードを auto-fill グリッドレイアウトに変更
 
   【ファイル構成】
-  Step 3:
-    ├── index.html         ← このファイル
+  Step 4:
+    ├── index.html              ← このファイル
+    ├── css/
+    │   └── style.css           ← 外部CSS（HTML から分離）
     └── js/
-        ├── protocol-base.js  ← Step 2 の protocol.js（そのまま）
-        ├── protocol.js       ← Step 3 拡張版（adapter_info, estop 等）
-        └── app.js            ← メインアプリ（Step 3 版）
+        ├── protocol-base.js    ← Step 2 から引き続き
+        ├── protocol.js         ← Step 3 から引き続き
+        ├── websocket-client.js ← WebSocket 接続をクラスで管理
+        ├── app.js              ← メインアプリ（Step 4 版）
+        └── sensors/
+            ├── lidar-viewer.js   ← LiDAR 2D ポーラープロット
+            ├── imu-chart.js      ← IMU 6軸リアルタイムチャート
+            ├── battery-gauge.js  ← SVG バッテリーゲージ
+            └── odometry.js       ← オドメトリ軌跡マップ
+
+  【外部CSSにする理由】
+  Step 3 までは <style> タグでインライン記述していた。
+  コードが大きくなると、HTML と CSS を分離したほうが:
+    - 見通しが良い
+    - ブラウザキャッシュが効く
+    - チームでの分業がしやすい
   =============================================================================
 -->
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Step 3: Adapter パターン 🤖</title>
-
-  <style>
-    /* ===== 基本スタイル（Step 2 踏襲） ===== */
-    * { box-sizing: border-box; }
-
-    body {
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: #1a1a2e;
-      color: #e0e0e0;
-      min-height: 100vh;
-    }
-
-    h1 { color: #00d4ff; border-bottom: 2px solid #00d4ff; padding-bottom: 10px; }
-    h2 { color: #00d4ff; font-size: 1.1em; margin: 16px 0 8px; }
-
-    /* ===== 接続状態 ===== */
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin: 16px 0;
-      padding: 12px 16px;
-      border-radius: 8px;
-      background-color: #16213e;
-    }
-
-    .status-dot {
-      width: 12px; height: 12px;
-      border-radius: 50%;
-      background-color: #dc3545;
-      transition: background-color 0.3s;
-    }
-    .status-dot.connected { background-color: #28a745; }
-
-    /* ===== ボタン ===== */
-    button {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: bold;
-      transition: opacity 0.2s, background-color 0.2s;
-    }
-    button:hover { opacity: 0.85; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .btn-connect { background-color: #28a745; color: white; }
-    .btn-disconnect { background-color: #dc3545; color: white; }
-    .btn-keyboard {
-      background-color: #16213e;
-      color: #ffd700;
-      border: 1px solid #ffd700;
-    }
-    .btn-keyboard.active {
-      background-color: #ffd700;
-      color: #1a1a2e;
-    }
-
-    .controls {
-      display: flex;
-      gap: 10px;
-      margin: 16px 0;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    /* ===================================================================
-       E-Stop（緊急停止）ボタン
-       ===================================================================
-       【実際のロボットの E-Stop】
-       産業用ロボットには必ず大きな赤い「非常停止ボタン」がある。
-       法律で義務付けられている（ISO 13850）。
-       ここではその仮想版をUIに実装する。
-       常に目立つ位置に配置し、すぐに押せるようにする。 */
-    .btn-estop {
-      background-color: #dc3545;
-      color: white;
-      font-size: 18px;
-      padding: 16px 32px;
-      border-radius: 50%;
-      border: 4px solid #ff6b6b;
-      box-shadow: 0 0 20px rgba(220, 53, 69, 0.4);
-      min-width: 80px;
-      min-height: 80px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.1s;
-    }
-    .btn-estop:hover:not(:disabled) {
-      background-color: #ff1a1a;
-      box-shadow: 0 0 30px rgba(220, 53, 69, 0.7);
-      transform: scale(1.05);
-    }
-    .btn-estop:active:not(:disabled) {
-      transform: scale(0.95);
-    }
-
-    /* ロボット接続ボタン */
-    .btn-robot-connect { background-color: #17a2b8; color: white; }
-    .btn-robot-disconnect { background-color: #6c757d; color: white; }
-
-    /* ===== ダッシュボード ===== */
-    .dashboard {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
-      margin: 16px 0;
-    }
-
-    .sensor-card {
-      background-color: #16213e;
-      border-radius: 8px;
-      padding: 16px;
-      text-align: center;
-      border: 1px solid #2a2a4e;
-      transition: border-color 0.3s;
-    }
-
-    .sensor-card .label {
-      font-size: 12px;
-      color: #888;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
-    }
-
-    .sensor-card .value {
-      font-size: 24px;
-      font-weight: bold;
-      color: #00d4ff;
-      font-family: 'Cascadia Code', 'Fira Code', monospace;
-    }
-
-    /* ===================================================================
-       バッテリーバー
-       ===================================================================
-       CSS で進捗バーを実装する方法。
-       外側のコンテナ（固定幅）と内側のバー（widthを動的に変更）。 */
-    .battery-bar-container {
-      width: 100%;
-      height: 20px;
-      background-color: #0f0f23;
-      border-radius: 10px;
-      overflow: hidden;
-      margin-top: 8px;
-      border: 1px solid #333;
-    }
-
-    .battery-bar {
-      height: 100%;
-      background-color: #28a745;
-      border-radius: 10px;
-      transition: width 0.5s ease, background-color 0.5s ease;
-      width: 0%;
-    }
-
-    /* ===== アダプター情報パネル ===== */
-    .adapter-info {
-      background-color: #16213e;
-      border: 1px solid #2a2a4e;
-      border-radius: 8px;
-      padding: 16px;
-      margin: 16px 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
-
-    .adapter-info .info-item {
-      text-align: center;
-    }
-
-    .adapter-info .info-label {
-      font-size: 11px;
-      color: #888;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .adapter-info .info-value {
-      font-size: 16px;
-      font-weight: bold;
-      color: #ffd700;
-      margin-top: 4px;
-    }
-
-    /* ===== WASD キーボード ===== */
-    .keyboard-panel {
-      background-color: #16213e;
-      border-radius: 8px;
-      padding: 16px;
-      border: 1px solid #2a2a4e;
-    }
-
-    .wasd-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 56px);
-      gap: 6px;
-      justify-content: center;
-      margin: 12px 0;
-    }
-
-    .key {
-      width: 56px;
-      height: 56px;
-      background-color: #0f0f23;
-      border: 2px solid #444;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: monospace;
-      font-size: 18px;
-      font-weight: bold;
-      color: #888;
-      transition: all 0.1s ease;
-      user-select: none;
-    }
-
-    .key.active {
-      background-color: #00d4ff;
-      border-color: #00d4ff;
-      color: #1a1a2e;
-      transform: scale(0.95);
-      box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
-    }
-
-    .key-w { grid-column: 2; }
-    .key-space {
-      grid-column: 1 / 4;
-      width: auto;
-      font-size: 14px;
-    }
-
-    .last-command {
-      text-align: center;
-      color: #ffd700;
-      font-size: 14px;
-      margin-top: 8px;
-      min-height: 1.2em;
-    }
-
-    /* ===== メッセージログ ===== */
-    .messages {
-      background-color: #0f0f23;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 16px;
-      max-height: 250px;
-      overflow-y: auto;
-      font-family: 'Cascadia Code', 'Fira Code', monospace;
-      font-size: 13px;
-    }
-
-    .message { padding: 4px 0; border-bottom: 1px solid #1a1a3e; word-break: break-all; }
-    .message.sent { color: #ffd700; }
-    .message.received { color: #00d4ff; }
-    .message.system { color: #888; font-style: italic; }
-    .timestamp { color: #666; font-size: 11px; }
-    .counter { color: #888; font-size: 13px; margin-top: 8px; }
-
-    /* ===== 説明テキスト ===== */
-    .help {
-      background-color: #16213e;
-      border-left: 4px solid #00d4ff;
-      padding: 12px 16px;
-      margin: 16px 0;
-      border-radius: 0 8px 8px 0;
-      font-size: 14px;
-      line-height: 1.6;
-    }
-
-    kbd {
-      background-color: #0f0f23;
-      border: 1px solid #444;
-      border-radius: 4px;
-      padding: 2px 6px;
-      font-family: monospace;
-      font-size: 12px;
-    }
-
-    /* ===== 3カラムレイアウト ===== */
-    .main-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 16px;
-      margin: 16px 0;
-    }
-
-    /* ===== レスポンシブ ===== */
-    @media (max-width: 768px) {
-      .main-grid {
-        grid-template-columns: 1fr;
-      }
-      .dashboard {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
+  <title>Step 4: センサー可視化 🤖</title>
+  <!-- 外部 CSS の読み込み -->
+  <link rel="stylesheet" href="./css/style.css">
 </head>
 
 <body>
-  <h1>🤖 Step 3: Adapter パターン</h1>
+  <h1>🤖 Step 4: センサー可視化ダッシュボード</h1>
 
   <!-- 説明テキスト -->
   <div class="help">
-    💡 <strong>Step 3 の新機能:</strong> Adapter パターンでロボットを抽象化 + Docker Compose<br>
-    MockAdapter がセンサーデータ（オドメトリ + バッテリー）をリアルタイム生成。<br>
-    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> でロボットを動かすと、位置が変化します！
+    💡 <strong>Step 4 の新機能:</strong> 4種のセンサーを Canvas / SVG でリアルタイム描画<br>
+    MockAdapter が LiDAR (10Hz), IMU (50Hz), Odometry (10Hz), Battery (1Hz) を生成。<br>
+    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> でロボットを動かすと、LiDAR とオドメトリが変化します！
   </div>
 
-  <!-- WebSocket 接続状態 -->
+  <!-- ============================================================
+       接続状態 + コントロール
+       ============================================================ -->
   <div class="status">
     <div id="statusDot" class="status-dot"></div>
     <span id="statusText">未接続</span>
   </div>
 
-  <!-- コントロールボタン -->
   <div class="controls">
     <button id="btnConnect" class="btn-connect" onclick="connectWebSocket()">
       🔌 WS接続
@@ -370,7 +83,7 @@
     </button>
   </div>
 
-  <!-- アダプター情報パネル -->
+  <!-- アダプター情報 + E-Stop -->
   <div class="adapter-info">
     <div class="info-item">
       <div class="info-label">アダプター</div>
@@ -380,65 +93,79 @@
       <div class="info-label">ロボット状態</div>
       <div class="info-value" id="robotStatus">🔴 未接続</div>
     </div>
-    <!-- E-Stop ボタン -->
     <button id="btnEStop" class="btn-estop" onclick="sendEStop()" disabled title="緊急停止">
       🛑<br><small>E-STOP</small>
     </button>
   </div>
 
-  <!-- ===================================================================
-       メインダッシュボード: オドメトリ + バッテリー + WASD
-       =================================================================== -->
-  <div class="main-grid">
+  <!-- ============================================================
+       センサーダッシュボード
+       ============================================================
+       【CSS Grid: auto-fill + minmax】
+       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+       → コンテナの幅に応じて自動的にカラム数を調整する。
+       300px 以上なら 1fr（均等幅）に拡大する。
+       画面幅が狭ければ 1 列、広ければ 2〜3 列に自動配置。
+       ============================================================ -->
+  <div class="dashboard-grid">
 
-    <!-- 左カラム: オドメトリ（位置・速度） -->
-    <div>
-      <h2>📍 オドメトリ</h2>
-      <div class="dashboard">
-        <div class="sensor-card">
-          <div class="label">X位置</div>
-          <div class="value" id="odomPosX">-- m</div>
-        </div>
-        <div class="sensor-card">
-          <div class="label">Y位置</div>
-          <div class="value" id="odomPosY">-- m</div>
-        </div>
-        <div class="sensor-card">
-          <div class="label">向き (θ)</div>
-          <div class="value" id="odomTheta">--°</div>
-        </div>
-        <div class="sensor-card">
-          <div class="label">速度</div>
-          <div class="value" id="odomSpeed">-- m/s</div>
-        </div>
+    <!-- ===== LiDAR カード ===== -->
+    <div class="sensor-card">
+      <div class="card-header">
+        <h3>📡 LiDAR</h3>
+        <span class="card-badge" id="lidarHz">0 Hz</span>
+      </div>
+      <div class="canvas-container">
+        <!--
+          【Canvas 要素】
+          <canvas> は HTML5 で追加された描画用要素。
+          width/height 属性は描画解像度（ピクセル数）。
+          CSS の width/height は表示サイズ。
+          この 2 つが異なると拡大/縮小される（ぼやけの原因にもなる）。
+        -->
+        <canvas id="lidarCanvas" width="400" height="400"></canvas>
       </div>
     </div>
 
-    <!-- 中央カラム: バッテリー -->
-    <div>
-      <h2>🔋 バッテリー</h2>
-      <div class="sensor-card" style="padding: 20px;">
-        <div class="value" id="batteryPercent" style="font-size: 40px; margin-bottom: 12px;">--%</div>
-        <div class="battery-bar-container">
-          <div class="battery-bar" id="batteryBar"></div>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin-top: 12px;">
-          <div>
-            <div class="label">電圧</div>
-            <div style="color: #00d4ff; font-family: monospace;" id="batteryVoltage">--V</div>
-          </div>
-          <div>
-            <div class="label">温度</div>
-            <div style="color: #00d4ff; font-family: monospace;" id="batteryTemp">--°C</div>
-          </div>
-        </div>
+    <!-- ===== IMU カード ===== -->
+    <div class="sensor-card">
+      <div class="card-header">
+        <h3>🧭 IMU（慣性計測装置）</h3>
+        <span class="card-badge" id="imuHz">0 Hz</span>
       </div>
+      <div class="canvas-container">
+        <canvas id="imuCanvas" width="400" height="250"></canvas>
+      </div>
+      <div id="imuLegend"></div>
     </div>
 
-    <!-- 右カラム: WASD キーボード -->
-    <div>
-      <h2>🎮 キーボード操作</h2>
-      <div class="keyboard-panel">
+    <!-- ===== オドメトリ カード ===== -->
+    <div class="sensor-card">
+      <div class="card-header">
+        <h3>📍 オドメトリ</h3>
+        <span class="card-badge" id="odomHz">0 Hz</span>
+      </div>
+      <div class="canvas-container">
+        <canvas id="odomCanvas" width="400" height="300"></canvas>
+      </div>
+      <div id="odomValues"></div>
+    </div>
+
+    <!-- ===== バッテリー カード ===== -->
+    <div class="sensor-card">
+      <div class="card-header">
+        <h3>🔋 バッテリー</h3>
+        <span class="card-badge" id="batteryHz">0 Hz</span>
+      </div>
+      <div id="batteryGauge"></div>
+    </div>
+
+    <!-- ===== WASD キーボード カード ===== -->
+    <div class="sensor-card">
+      <div class="card-header">
+        <h3>🎮 キーボード操作</h3>
+      </div>
+      <div class="keyboard">
         <div class="wasd-grid">
           <div id="keyW" class="key key-w">W</div>
           <div id="keyA" class="key">A</div>
@@ -451,12 +178,14 @@
     </div>
   </div>
 
-  <!-- メッセージログ -->
+  <!-- ============================================================
+       メッセージログ
+       ============================================================ -->
   <h2>📋 メッセージログ</h2>
   <div id="messages" class="messages"></div>
   <div id="counter" class="counter">送信: 0 | 受信: 0</div>
 
-  <!-- JavaScript -->
+  <!-- JavaScript（ES Modules） -->
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>

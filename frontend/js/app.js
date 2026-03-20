@@ -1,13 +1,31 @@
 // =============================================================================
-// Step 3: Adapter パターン — app.js（メインアプリケーション）
+// Step 4: センサー可視化 — app.js（メインアプリケーション）
 // =============================================================================
 //
-// 【Step 2 からの変更点】
-// 1. adapter_info メッセージへの対応（接続時にロボット情報を受信）
-// 2. 緊急停止（E-Stop）ボタンの処理
-// 3. ロボット接続/切断をUIから操作
-// 4. オドメトリ + バッテリーのセンサー表示
-// 5. Docker 環境対応（WSホスト自動判定）
+// 【Step 3 からの変更点】
+// 1. WebSocketClient クラスを使って接続管理を抽象化
+// 2. センサービューアクラスを import してデータをルーティング
+// 3. Hz（更新頻度）の計測と表示
+// 4. Canvas ベースのセンサー描画
+//
+// 【アーキテクチャ: Observer パターン風のデータフロー】
+//
+//   WebSocket → WebSocketClient.onMessage(callback)
+//                       ↓
+//                handleMessage(msg)
+//                       ↓
+//           ┌──── switch(msg.type) ────┐
+//           │                          │
+//     sensor_data                command_ack / adapter_info / error
+//           ↓
+//  handleSensorData(msg)
+//           ↓
+//  ┌── payload 判定 ──────┐
+//  │ "ranges" → LiDAR     │
+//  │ "accel_x" → IMU      │
+//  │ "pos_x" → Odom       │
+//  │ "percentage" → Batt   │
+//  └───────────────────────┘
 //
 // =============================================================================
 import {
@@ -19,24 +37,63 @@ import {
   createDisconnectCmd,
   encodeMessage,
   decodeMessage,
-  formatOdomData,
-  formatBatteryData,
 } from "./protocol.js";
+
+import { WebSocketClient } from "./websocket-client.js";
+import { LidarViewer } from "./sensors/lidar-viewer.js";
+import { ImuChart } from "./sensors/imu-chart.js";
+import { BatteryGauge } from "./sensors/battery-gauge.js";
+import { OdometryViewer } from "./sensors/odometry.js";
+
+// =============================================================================
+// センサービューアの初期化
+// =============================================================================
+//
+// 【各ビューアの責務】
+// - LidarViewer: Canvas に極座標プロット（360点の距離データ）
+// - ImuChart: Canvas にリングバッファ式ラインチャート（6軸）
+// - BatteryGauge: SVG で円形ゲージを描画
+// - OdometryViewer: Canvas にミニマップ + HTML で数値表示
+const lidarViewer = new LidarViewer("lidarCanvas");
+const imuChart = new ImuChart("imuCanvas", "imuLegend");
+const batteryGauge = new BatteryGauge("batteryGauge");
+const odomViewer = new OdometryViewer("odomCanvas", "odomValues");
+
+// =============================================================================
+// Hz カウンター — センサーの更新頻度を計測
+// =============================================================================
+//
+// 【Hz（ヘルツ）とは？】
+// 1秒あたりの更新回数。LiDAR は ~10Hz（100ms間隔）、IMU は ~50Hz（20ms間隔）。
+// 実際のロボット開発でも、センサーの Hz は重要な性能指標。
+//
+// 【計測方法】
+// 1秒間に受信したカウントを保持し、1秒ごとにリセット。
+// requestAnimationFrame ではなく setInterval で 1 秒ごとに更新。
+const hzCounters = {
+  lidar: { count: 0, element: null },
+  imu: { count: 0, element: null },
+  odom: { count: 0, element: null },
+  battery: { count: 0, element: null },
+};
+
+// 1 秒ごとに Hz 表示を更新
+setInterval(() => {
+  for (const [key, counter] of Object.entries(hzCounters)) {
+    if (counter.element) {
+      counter.element.textContent = `${counter.count} Hz`;
+    }
+    counter.count = 0;
+  }
+}, 1000);
 
 // =============================================================================
 // アプリケーション状態
 // =============================================================================
-let ws = null;
-let sentCount = 0;
-let receivedCount = 0;
+let wsClient = null;
 let keyboardEnabled = false;
 
-// 【Docker 環境対応】
-// ブラウザのホスト名に応じて WebSocket 接続先を決定。
-// Docker Compose では frontend が nginx:3000、gateway が gateway:8080 で動く。
-// ブラウザから見ると:
-//   - ローカル開発: ws://localhost:8080/ws
-//   - Docker: ws://localhost:8080/ws（ポートマッピング経由）
+// Docker 環境対応: ブラウザのホスト名から WS 接続先を決定
 const WS_HOST = window.location.hostname || "localhost";
 const WS_URL = `ws://${WS_HOST}:8080/ws`;
 
@@ -51,22 +108,12 @@ const elements = {
   btnKeyboard: document.getElementById("btnKeyboard"),
   messagesDiv: document.getElementById("messages"),
   counterDiv: document.getElementById("counter"),
-  // Step 3 追加: ロボット関連
+  // ロボット関連
   btnRobotConnect: document.getElementById("btnRobotConnect"),
   btnRobotDisconnect: document.getElementById("btnRobotDisconnect"),
   btnEStop: document.getElementById("btnEStop"),
   robotStatus: document.getElementById("robotStatus"),
   adapterName: document.getElementById("adapterName"),
-  // Step 3: オドメトリ表示
-  odomPosX: document.getElementById("odomPosX"),
-  odomPosY: document.getElementById("odomPosY"),
-  odomTheta: document.getElementById("odomTheta"),
-  odomSpeed: document.getElementById("odomSpeed"),
-  // Step 3: バッテリー表示
-  batteryPercent: document.getElementById("batteryPercent"),
-  batteryVoltage: document.getElementById("batteryVoltage"),
-  batteryTemp: document.getElementById("batteryTemp"),
-  batteryBar: document.getElementById("batteryBar"),
   // WASD キー表示
   keyW: document.getElementById("keyW"),
   keyA: document.getElementById("keyA"),
@@ -76,100 +123,143 @@ const elements = {
   lastCommand: document.getElementById("lastCommand"),
 };
 
+// Hz バッジの取得
+hzCounters.lidar.element = document.getElementById("lidarHz");
+hzCounters.imu.element = document.getElementById("imuHz");
+hzCounters.odom.element = document.getElementById("odomHz");
+hzCounters.battery.element = document.getElementById("batteryHz");
+
 // =============================================================================
-// connectWebSocket — WebSocket 接続を確立
+// connectWebSocket — WebSocketClient で接続
 // =============================================================================
+//
+// 【Step 3 との違い】
+// Step 3: 生の WebSocket API を直接使用（ws = new WebSocket(url)）
+// Step 4: WebSocketClient クラスで接続管理を抽象化
+//
+// WebSocketClient は以下を内部で管理する:
+//   - 接続/切断の状態
+//   - 送受信カウント
+//   - コールバック（onMessage, onStateChange）
 export function connectWebSocket() {
-  ws = new WebSocket(WS_URL);
+  wsClient = new WebSocketClient(WS_URL, {
+    // メッセージ受信コールバック
+    onMessage: (rawData) => {
+      const msg = decodeMessage(rawData);
+      if (!msg) {
+        addMessage("⚠️ 不正なメッセージを受信", "system");
+        return;
+      }
+      handleMessage(msg);
+      updateCounter();
+    },
 
-  ws.onopen = function () {
-    addMessage("✅ サーバーに接続しました", "system");
-    setConnectedState(true);
-  };
+    // 接続状態変更コールバック
+    onStateChange: (connected) => {
+      if (connected) {
+        addMessage("✅ サーバーに接続しました", "system");
+      } else {
+        addMessage("❌ 接続が閉じました", "system");
+      }
+      setConnectedState(connected);
+    },
+  });
 
-  ws.onmessage = function (event) {
-    receivedCount++;
-    updateCounter();
-
-    const msg = decodeMessage(event.data);
-    if (!msg) {
-      addMessage("⚠️ 不正なメッセージを受信", "system");
-      return;
-    }
-
-    handleMessage(msg);
-  };
-
-  ws.onclose = function (event) {
-    addMessage(`❌ 接続が閉じました（コード: ${event.code}）`, "system");
-    setConnectedState(false);
-    ws = null;
-  };
-
-  ws.onerror = function () {
-    addMessage("⚠️ WebSocket エラーが発生しました", "system");
-  };
+  wsClient.connect();
 }
 
 // =============================================================================
-// disconnectWebSocket — WebSocket 接続を切断
+// disconnectWebSocket — 切断
 // =============================================================================
 export function disconnectWebSocket() {
-  if (ws) {
-    ws.close(1000, "ユーザーが切断しました");
+  if (wsClient) {
+    wsClient.disconnect();
   }
 }
 
 // =============================================================================
-// handleMessage — 受信メッセージを Type に応じて処理
+// handleMessage — 受信メッセージをタイプ別に処理
 // =============================================================================
-//
-// 【Step 2 からの変更点】
-// adapter_info メッセージ対応を追加。
-// sensor_data の処理を Adapter 形式に対応。
 function handleMessage(msg) {
   switch (msg.type) {
     case MessageType.SENSOR_DATA:
       handleSensorData(msg);
       break;
-
     case MessageType.COMMAND_ACK:
       handleCommandAck(msg);
       break;
-
     case MessageType.ERROR:
       handleError(msg);
       break;
-
     case MessageType.ADAPTER_INFO:
       handleAdapterInfo(msg);
       break;
-
     default:
       addMessage(`⚠️ 不明なメッセージタイプ: ${msg.type}`, "system");
   }
 }
 
 // =============================================================================
-// handleAdapterInfo — アダプター情報の受信処理
+// handleSensorData — センサーデータを適切なビューアに振り分け
 // =============================================================================
 //
-// 【Step 3 で新規追加】
-// 接続直後にサーバーからアダプター情報が送られてくる。
-// ロボットの能力を知ることで、UIを適切に設定できる。
+// 【ルーティングの仕組み】
+// MockAdapter は SensorData の Data（= map[string]any）を payload に入れて送る。
+// payload のキーを見て、どのセンサーのデータかを判別する。
+//
+// これは簡易的な方法。プロダクションでは topic フィールドや
+// data_type フィールドで明示的にルーティングする。
+//
+// 【各センサーのデータ形式】
+// LiDAR:    { ranges: number[], angles: number[], num_points, min_range, max_range }
+// IMU:      { accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z }
+// Odom:     { pos_x, pos_y, theta, linear_x, angular_z, speed }
+// Battery:  { percentage, voltage, temperature }
+function handleSensorData(msg) {
+  const data = msg.payload;
+  if (!data) return;
+
+  // LiDAR: ranges 配列を持っている
+  if ("ranges" in data) {
+    lidarViewer.update(data);
+    hzCounters.lidar.count++;
+    return;
+  }
+
+  // IMU: accel_x を持っている
+  if ("accel_x" in data) {
+    imuChart.update(data);
+    hzCounters.imu.count++;
+    return;
+  }
+
+  // Odom: pos_x を持っている
+  if ("pos_x" in data) {
+    odomViewer.update(data);
+    hzCounters.odom.count++;
+    return;
+  }
+
+  // Battery: percentage を持っている
+  if ("percentage" in data) {
+    batteryGauge.update(data);
+    hzCounters.battery.count++;
+    return;
+  }
+}
+
+// =============================================================================
+// handleAdapterInfo — アダプター情報の受信処理
+// =============================================================================
 function handleAdapterInfo(msg) {
   const info = msg.payload;
   addMessage(`🤖 アダプター: ${info.adapter_name} (接続: ${info.connected})`, "received");
 
-  // アダプター名を表示
   if (elements.adapterName) {
     elements.adapterName.textContent = info.adapter_name;
   }
-
-  // ロボット接続状態を更新
   setRobotConnected(info.connected);
 
-  // 能力情報をログに表示
   if (info.capabilities) {
     const caps = info.capabilities;
     addMessage(
@@ -178,9 +268,9 @@ function handleAdapterInfo(msg) {
       `ナビ: ${caps.navigation ? "✅" : "❌"}`,
       "system"
     );
-    if (caps.max_linear) {
+    if (caps.sensor_topics) {
       addMessage(
-        `  速度上限: linear=${caps.max_linear} m/s, angular=${caps.max_angular} rad/s`,
+        `  センサートピック: ${caps.sensor_topics.join(", ")}`,
         "system"
       );
     }
@@ -188,63 +278,12 @@ function handleAdapterInfo(msg) {
 }
 
 // =============================================================================
-// handleSensorData — センサーデータの受信処理（Step 3 版）
-// =============================================================================
-//
-// 【Step 2 からの変更点】
-// Step 2: 固定的な temperature, battery, speed, distance フィールド
-// Step 3: Adapter の SensorData 形式（payload が map[string]any）
-//
-// msg.payload にはセンサーデータの map がそのまま入っている。
-// data_type フィールドでデータの種類を判別する。
-//
-// ただし、Step 3 の sensorDataToMessage では msg.payload = data.Data なので
-// data_type は msg に直接含まれない。
-// 代わりに payload の内容で判別する。
-function handleSensorData(msg) {
-  const data = msg.payload;
-  if (!data) return;
-
-  // オドメトリデータの判定: pos_x が含まれている
-  if ("pos_x" in data) {
-    const formatted = formatOdomData(data);
-    if (elements.odomPosX) elements.odomPosX.textContent = formatted.posX;
-    if (elements.odomPosY) elements.odomPosY.textContent = formatted.posY;
-    if (elements.odomTheta) elements.odomTheta.textContent = formatted.theta;
-    if (elements.odomSpeed) elements.odomSpeed.textContent = formatted.speed;
-  }
-
-  // バッテリーデータの判定: percentage が含まれている
-  if ("percentage" in data) {
-    const formatted = formatBatteryData(data);
-    if (elements.batteryPercent) elements.batteryPercent.textContent = formatted.percentage;
-    if (elements.batteryVoltage) elements.batteryVoltage.textContent = formatted.voltage;
-    if (elements.batteryTemp) elements.batteryTemp.textContent = formatted.temperature;
-
-    // バッテリーバーの更新
-    const pct = data.percentage || 0;
-    if (elements.batteryBar) {
-      elements.batteryBar.style.width = `${pct}%`;
-      // 残量に応じて色を変える
-      if (pct > 50) {
-        elements.batteryBar.style.backgroundColor = "#28a745";
-      } else if (pct > 20) {
-        elements.batteryBar.style.backgroundColor = "#ffc107";
-      } else {
-        elements.batteryBar.style.backgroundColor = "#dc3545";
-      }
-    }
-  }
-}
-
-// =============================================================================
-// handleCommandAck — コマンド応答の表示
+// handleCommandAck — コマンド応答の処理
 // =============================================================================
 function handleCommandAck(msg) {
   const { status, description } = msg.payload;
   addMessage(`🤖 [${status}] ${description}`, "received");
 
-  // ロボット接続/切断に応じてUIを更新
   if (status === "connected") {
     setRobotConnected(true);
   } else if (status === "disconnected") {
@@ -263,65 +302,37 @@ function handleError(msg) {
 }
 
 // =============================================================================
-// sendVelocityCmd — 速度コマンドを送信
+// コマンド送信関数
 // =============================================================================
-export function sendVelocityCmd(linearX, linearY, angularZ) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-  const msg = createVelocityCmd(linearX, linearY, angularZ);
-  const json = encodeMessage(msg);
-  ws.send(json);
-
-  sentCount++;
-  updateCounter();
+function sendMessage(msgObj) {
+  if (!wsClient || !wsClient.isConnected) return;
+  wsClient.send(encodeMessage(msgObj));
 }
 
-// =============================================================================
-// sendEStop — 緊急停止コマンドを送信
-// =============================================================================
-//
-// 【緊急停止（E-Stop）とは？】
-// ロボットを即座に停止させるための安全機能。
-// 実際のロボットにはハードウェアのE-Stopボタンがある。
-// このソフトウェア版は、WebSocket 経由でサーバーに停止命令を送る。
+export function sendVelocityCmd(linearX, linearY, angularZ) {
+  sendMessage(createVelocityCmd(linearX, linearY, angularZ));
+}
+
 export function sendEStop() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
+  if (!wsClient || !wsClient.isConnected) {
     addMessage("⚠️ サーバー未接続です", "system");
     return;
   }
-
-  const msg = createEStopCmd();
-  const json = encodeMessage(msg);
-  ws.send(json);
-
-  sentCount++;
-  updateCounter();
+  sendMessage(createEStopCmd());
   addMessage("🚨 緊急停止コマンドを送信しました", "sent");
 }
 
-// =============================================================================
-// sendRobotConnect / sendRobotDisconnect — ロボット接続管理
-// =============================================================================
 export function sendRobotConnect() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
-  const msg = createConnectCmd();
-  ws.send(encodeMessage(msg));
-  sentCount++;
-  updateCounter();
+  sendMessage(createConnectCmd());
 }
 
 export function sendRobotDisconnect() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
-  const msg = createDisconnectCmd();
-  ws.send(encodeMessage(msg));
-  sentCount++;
-  updateCounter();
+  sendMessage(createDisconnectCmd());
 }
 
 // =============================================================================
-// キーボード入力の処理（Step 2 と共通）
+// キーボード入力の処理
 // =============================================================================
 
 export function toggleKeyboardControl() {
@@ -386,6 +397,7 @@ function highlightKey(key, active) {
 // =============================================================================
 
 function addMessage(text, type) {
+  if (!elements.messagesDiv) return;
   const div = document.createElement("div");
   div.classList.add("message", type);
   const time = new Date().toLocaleTimeString();
@@ -401,19 +413,19 @@ function addMessage(text, type) {
 
 function setConnectedState(connected) {
   if (connected) {
-    elements.statusDot.classList.add("connected");
-    elements.statusText.textContent = `接続中 (${WS_URL})`;
-    elements.btnConnect.disabled = true;
-    elements.btnDisconnect.disabled = false;
+    elements.statusDot?.classList.add("connected");
+    if (elements.statusText) elements.statusText.textContent = `接続中 (${WS_URL})`;
+    if (elements.btnConnect) elements.btnConnect.disabled = true;
+    if (elements.btnDisconnect) elements.btnDisconnect.disabled = false;
     if (elements.btnKeyboard) elements.btnKeyboard.disabled = false;
     if (elements.btnRobotConnect) elements.btnRobotConnect.disabled = false;
     if (elements.btnRobotDisconnect) elements.btnRobotDisconnect.disabled = false;
     if (elements.btnEStop) elements.btnEStop.disabled = false;
   } else {
-    elements.statusDot.classList.remove("connected");
-    elements.statusText.textContent = "未接続";
-    elements.btnConnect.disabled = false;
-    elements.btnDisconnect.disabled = true;
+    elements.statusDot?.classList.remove("connected");
+    if (elements.statusText) elements.statusText.textContent = "未接続";
+    if (elements.btnConnect) elements.btnConnect.disabled = false;
+    if (elements.btnDisconnect) elements.btnDisconnect.disabled = true;
     if (elements.btnKeyboard) elements.btnKeyboard.disabled = true;
     if (elements.btnRobotConnect) elements.btnRobotConnect.disabled = true;
     if (elements.btnRobotDisconnect) elements.btnRobotDisconnect.disabled = true;
@@ -426,7 +438,6 @@ function setConnectedState(connected) {
   }
 }
 
-// setRobotConnected — ロボット接続状態のUI更新
 function setRobotConnected(connected) {
   if (elements.robotStatus) {
     elements.robotStatus.textContent = connected ? "🟢 接続中" : "🔴 未接続";
@@ -435,7 +446,9 @@ function setRobotConnected(connected) {
 }
 
 function updateCounter() {
-  elements.counterDiv.textContent = `送信: ${sentCount} | 受信: ${receivedCount}`;
+  if (!elements.counterDiv || !wsClient) return;
+  elements.counterDiv.textContent =
+    `送信: ${wsClient.sentCount} | 受信: ${wsClient.receivedCount}`;
 }
 
 // =============================================================================

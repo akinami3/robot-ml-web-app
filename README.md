@@ -1,149 +1,94 @@
-# Step 3: Adapter パターン 🤖
+# Step 4: センサー可視化ダッシュボード 📡
 
-## 学習目標
-- Go のインターフェースと暗黙的実装
-- デザインパターン: **Adapter**, **Factory**, **Registry**
-- `cmd/` + `internal/` プロジェクトレイアウト
-- Docker Compose の基礎
+## 概要
 
-## Step 2 からの変更点
+4種類のセンサーデータをリアルタイムに Canvas / SVG で可視化するステップ。
+MockAdapter を拡張してLiDAR・IMU データを生成し、ブラウザ上で描画する。
 
-### Gateway（Go）
-| 変更 | 内容 |
-|------|------|
-| `main.go` → `cmd/gateway/main.go` | エントリーポイントを `cmd/` に分離 |
-| `internal/adapter/interface.go` | RobotAdapter インターフェース定義 |
-| `internal/adapter/registry.go` | ファクトリパターンでアダプター管理 |
-| `internal/adapter/mock/mock_adapter.go` | モックロボット（センサーデータ生成） |
-| `internal/server/websocket.go` | WebSocket サーバーを server パッケージに分離 |
+## 学習ポイント
 
-### フロントエンド
-| 変更 | 内容 |
-|------|------|
-| `index.html` | オドメトリ + バッテリー表示、E-Stop ボタン追加 |
-| `js/protocol.js` | adapter_info, estop, connect, disconnect メッセージ追加 |
-| `js/app.js` | ロボット接続管理、E-Stop、Adapter 形式センサー対応 |
+### Canvas 2D API
+- `<canvas>` 要素と `getContext('2d')` による描画
+- 座標変換（translate, rotate）
+- requestAnimationFrame ではなく WebSocket メッセージ駆動の更新
 
-### インフラ
-| 変更 | 内容 |
-|------|------|
-| `docker-compose.yml` | Gateway + Frontend(nginx) のサービス定義 |
-| `gateway/Dockerfile` | マルチステージビルド |
+### SVG（Scalable Vector Graphics）
+- `<circle>` と `stroke-dasharray` / `stroke-dashoffset` による円形ゲージ
+- Canvas との使い分け: UIパーツ → SVG、高頻度更新 → Canvas
 
-## プロジェクト構造
+### ES Classes とプライベートフィールド
+- `class` 構文による OOP
+- `#field` でプライベートフィールドを宣言（ES2022）
+- コンストラクタでの依存性注入パターン
+
+### センサーデータの基礎
+| センサー | 周波数 | データ内容 |
+|----------|--------|------------|
+| LiDAR | 10 Hz | 360点の距離データ（極座標） |
+| IMU | 50 Hz | 加速度 3軸 + ジャイロ 3軸 |
+| Odometry | 10 Hz | 位置 (x,y)、向き θ、速度 |
+| Battery | 1 Hz | 残量 %、電圧、温度 |
+
+### 外部 CSS
+- `<style>` タグからの分離
+- CSSファイルのキャッシュメリット
+- BEM 風のクラス命名
+
+## ファイル構成
 
 ```
 gateway/
-├── cmd/gateway/main.go           # エントリーポイント（配線のみ）
-├── internal/
-│   ├── adapter/
-│   │   ├── interface.go          # RobotAdapter インターフェース
-│   │   ├── registry.go           # アダプター管理（Factory + Registry）
-│   │   └── mock/
-│   │       └── mock_adapter.go   # モックロボット
-│   ├── protocol/                 # Step 2 から継続
-│   │   ├── messages.go
-│   │   └── codec.go
-│   └── server/
-│       └── websocket.go          # WebSocket サーバー
-├── go.mod
-├── go.sum
-└── Dockerfile
+  internal/
+    adapter/mock/
+      mock_adapter.go  ← LiDAR + IMU 生成を追加
 
 frontend/
-├── index.html                    # ダッシュボード UI
-└── js/
-    ├── protocol-base.js          # Step 2 の protocol.js
-    ├── protocol.js               # Step 3 拡張版
-    └── app.js                    # メインアプリ
-
-docker-compose.yml                # サービス定義
+  index.html           ← 外部CSS参照 + ダッシュボードレイアウト
+  css/
+    style.css          ← 外部CSS（auto-fill グリッド）
+  js/
+    protocol-base.js   ← Step 2 から継続
+    protocol.js        ← Step 3 から継続
+    websocket-client.js ← WebSocket をクラスで管理
+    app.js             ← センサーデータのルーティング
+    sensors/
+      lidar-viewer.js  ← LiDAR 極座標プロット
+      imu-chart.js     ← IMU 6軸リアルタイムチャート
+      battery-gauge.js ← SVG 円形バッテリーゲージ
+      odometry.js      ← 軌跡付きミニマップ
 ```
 
 ## 起動方法
 
-### ローカル開発（Docker なし）
-
-```bash
-# Gateway を起動
-cd gateway
-go run cmd/gateway/main.go
-
-# 別のターミナルでフロントエンドを起動
-cd frontend
-python3 -m http.server 3000
-# → http://localhost:3000 でアクセス
-```
-
-### Docker Compose
-
 ```bash
 docker compose up --build
-# → http://localhost:3000 でフロントエンド
-# → ws://localhost:8080/ws で WebSocket
 ```
 
-## キーコンセプト
+ブラウザで http://localhost:3000 を開き、「WS接続」→「ロボット接続」。
 
-### 1. インターフェースの暗黙的実装
+## MockAdapter の LiDAR シミュレーション
 
-```go
-// interface.go: インターフェース定義
-type RobotAdapter interface {
-    Name() string
-    Connect(ctx context.Context, config map[string]any) error
-    SendCommand(ctx context.Context, cmd Command) error
-    // ...
-}
-
-// mock_adapter.go: 実装（"implements" キーワード不要）
-type MockAdapter struct { ... }
-func (m *MockAdapter) Name() string { return "mock" }
-func (m *MockAdapter) Connect(...) error { ... }
-
-// コンパイル時チェック
-var _ RobotAdapter = (*MockAdapter)(nil)
-```
-
-### 2. Factory + Registry パターン
-
-```go
-// ファクトリ関数を登録
-registry := adapter.NewRegistry()
-registry.RegisterFactory("mock", mock.Factory)
-
-// 名前からアダプターを生成
-adapter, err := registry.CreateAdapter("mock")
-```
-
-### 3. 依存性注入（DI）
-
-```go
-// main.go が各パーツを「注入」する
-srv := server.NewServer(robotAdapter, ":8080")
-```
-
-## 通信フロー
+MockAdapter は仮想的な部屋（10m × 8m）を定義し、ロボットの位置から
+各角度方向にレイキャスト（光線追跡）を行って壁までの距離を計算する。
 
 ```
-Browser                Server (Go)               MockAdapter
-  │                       │                          │
-  │── WS接続 ──────────►│                          │
-  │◄── adapter_info ────│                          │
-  │                       │                          │
-  │── "connect" ────────►│── Connect() ──────────►│
-  │◄── command_ack ─────│                          │
-  │                       │◄── SensorData (20Hz) ──│
-  │◄── sensor_data ─────│                          │
-  │◄── sensor_data ─────│                          │
-  │                       │                          │
-  │── velocity_cmd ────►│── SendCommand() ───────►│
-  │◄── command_ack ─────│                          │
-  │                       │   (位置更新 → センサーに反映)
-  │                       │                          │
-  │── "estop" ──────────►│── EmergencyStop() ────►│
-  │◄── command_ack ─────│                          │
+       Wall (y=4)
+  ┌─────────────────────┐
+  │                     │
+  │     Robot (0,0) →   │    360点のスキャン
+  │                     │
+  └─────────────────────┘
+       Wall (y=-4)
 ```
 
-## 次のステップ
-→ **Step 4: センサー可視化** — Canvas 2D でリアルタイム描画
+## Step 3 からの変更差分
+
+| 変更 | 詳細 |
+|------|------|
+| MockAdapter 拡張 | LiDAR (10Hz) + IMU (50Hz) センサー追加 |
+| 外部 CSS | `<style>` → `css/style.css` に分離 |
+| WebSocketClient | 生 WebSocket → クラスで抽象化 |
+| LidarViewer | Canvas: 極座標 → 直交座標変換で点群描画 |
+| ImuChart | Canvas: リングバッファ式 6 軸ラインチャート |
+| BatteryGauge | CSS バー → SVG 円形ゲージ |
+| OdometryViewer | 数値のみ → Canvas ミニマップ + 軌跡描画 |
