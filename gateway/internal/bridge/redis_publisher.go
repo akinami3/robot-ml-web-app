@@ -25,7 +25,7 @@
 //
 // 【このファイルの役割】
 //
-//   ゲートウェイ → Redis Streams → バックエンド（データ分析・ML）
+//	ゲートウェイ → Redis Streams → バックエンド（データ分析・ML）
 //
 // 【設計パターン: パブリッシャー（Publisher）パターン】
 // データの「発行者」として、データを Redis に書き込む責任を持つ。
@@ -158,8 +158,8 @@ func NewRedisPublisher(redisURL string) (*RedisPublisher, error) {
 // XADD はストリームにエントリを追加するコマンド。
 // 各エントリは自動生成されるID（タイムスタンプベース）とフィールド群で構成。
 //
-//   XADD robot:sensor_data * robot_id "robot-01" topic "/lidar" ...
-//         ^ストリーム名      ^自動ID   ^フィールド群
+//	XADD robot:sensor_data * robot_id "robot-01" topic "/lidar" ...
+//	      ^ストリーム名      ^自動ID   ^フィールド群
 //
 // 【Go言語の知識: メソッドレシーバ (r *RedisPublisher)】
 // func (r *RedisPublisher) PublishSensorData(...) は、

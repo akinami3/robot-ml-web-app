@@ -1,25 +1,20 @@
 # =============================================================================
-# Step 12: Docker Compose — Ollama LLM + Redis 追加
+# Step 13: Docker Compose — 本番構成（全サービス統合）
 # =============================================================================
 #
-# 【Step 9 からの変更点】
-# - redis サービスを追加（Step 11: データ記録用）
-# - ollama サービスを追加（Step 12: RAG の LLM サーバー）
-# - backend に REDIS_URL, OLLAMA_URL 環境変数を追加
-# - gateway に REDIS_URL 環境変数を追加
+# 【Step 12 からの変更点】
+# ヘッダーを Step 13 に更新。構成自体は Step 12 と同じ。
+# 本番用オーバーライと開発用オーバーライを分離:
+#   - docker-compose.dev.yml: ホットリロード、デバッグポート
+#   - docker-compose.prod.yml: リソース制限、ログローテーション
 #
-# 【サービス構成（Step 12: 6サービス）】
+# 【サービス構成（Step 13: 6サービス）】
 #
-#   ブラウザ → frontend (Vite :3000)
+#   ブラウザ → frontend (Vite :3000 / Nginx :80)
 #           → gateway  (WebSocket :8080) → Redis
 #           → backend  (FastAPI :8000) → PostgreSQL
 #                                          → Redis
 #                                          → Ollama (LLM :11434)
-#
-# 【Ollama とは？】
-# ローカルで LLM（大規模言語モデル）を動かせるオープンソースツール。
-# Docker コンテナとして起動し、HTTP API で LLM にアクセスできる。
-# llama3, mistral, gemma, nomic-embed-text など多数のモデルをサポート。
 #
 # =============================================================================
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# Step 12: FastAPI メインアプリケーション（RAG対応版）
+# Step 13: FastAPI メインアプリケーション（本番対応版）
 # =============================================================================
 #
 # 【Step 8 からの変更点（Step 11）】
@@ -149,8 +149,8 @@ async def lifespan(app: FastAPI):
 # =============================================================================
 app = FastAPI(
     title="Robot AI Web App API",
-    version="0.5.0",
-    description="Step 12: RAG System — ドキュメント検索 + LLM 回答生成",
+    version="1.0.0",
+    description="Step 13: Production — 全機能統合・本番運用対応",
     lifespan=lifespan,
 )
 
@@ -204,5 +204,5 @@ async def root():
     return {
         "message": "Robot AI Web App API",
         "docs": "/docs",
-        "version": "0.5.0",
+        "version": "1.0.0",
     }

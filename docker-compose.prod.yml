@@ -1,0 +1,192 @@
+# =============================================================================
+# Step 13: Docker Compose 本番用オーバーレイ
+# =============================================================================
+#
+# 【このファイルの役割】
+# docker-compose.yml（ベース設定）を本番環境用にカスタマイズするオーバーレイ。
+# リソース制限、ログローテーション、セキュリティ強化などを追加する。
+#
+# 【使い方】
+# docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 【開発用との違い】
+# - ボリュームマウントなし（コード変更をコンテナに入れたくない）
+# - リソース制限あり（メモリ・CPU の上限設定）
+# - ログローテーションあり（ディスクが溢れないように）
+# - restart: always（コンテナがクラッシュしたら自動で再起動）
+# - 本番用 Dockerfile を使用（multi-stage ビルドで軽量化）
+#
+# 【deploy.resources とは？】
+# Docker Compose v3 で導入されたリソース制限機能。
+# コンテナが使用できる CPU やメモリの上限を設定する。
+# これにより、1つのコンテナが暴走しても他のサービスに影響しない。
+#
+# 【ログローテーション】
+# logging.options で各コンテナのログ出力を制御:
+# - max-size: 1つのログファイルの最大サイズ
+# - max-file: 保持するログファイルの最大数
+# 例: max-size=10m, max-file=3 → 最大 30MB のログを保持
+#
+# =============================================================================
+
+services:
+
+  # ===========================================================================
+  # Gateway — 本番設定
+  # ===========================================================================
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # Backend — 本番設定
+  # ===========================================================================
+  #
+  # 【Gunicorn + Uvicorn Workers パターン】
+  # 本番では uvicorn を直接使わず、Gunicorn の中で Uvicorn Worker を動かす。
+  # Gunicorn がプロセスマネージャーとして複数のワーカーを管理し、
+  # リクエストを各ワーカーに分配する。
+  #
+  # --workers 4: 4つの並列ワーカー（CPU コア数に合わせて調整）
+  # --worker-class uvicorn.workers.UvicornWorker: 各ワーカーが AsyncIO 対応
+  #
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    command: >
+      gunicorn app.main:app
+      --bind 0.0.0.0:8000
+      --workers 4
+      --worker-class uvicorn.workers.UvicornWorker
+      --timeout 120
+      --access-logfile -
+    environment:
+      DEBUG: "false"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ===========================================================================
+  # Frontend — 本番設定（Nginx 静的配信）
+  # ===========================================================================
+  #
+  # 【本番と開発の違い】
+  # 開発: Vite 開発サーバー（HMR、ソースマップ、高速リロード）
+  # 本番: Nginx で静的ファイルを配信（高速、軽量、キャッシュ対応）
+  #
+  # 本番用 Dockerfile は multi-stage build:
+  #   Stage 1: Node.js で React をビルド（npm run build → dist/）
+  #   Stage 2: Nginx に dist/ だけコピー（Node.js は不要になる）
+  #
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # Database — 本番設定
+  # ===========================================================================
+  #
+  # 【本番 PostgreSQL の注意点】
+  # - ポートを外部に公開しない（セキュリティ）
+  # - リソース制限でメモリを確保
+  # - バックアップスクリプトを定期実行する（scripts/backup-db.sh）
+  #
+  db:
+    restart: always
+    ports: []  # 本番ではポートを外部に公開しない
+    environment:
+      # 本番では強力なパスワードに変更すること！
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-robot}"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+        reservations:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ===========================================================================
+  # Redis — 本番設定
+  # ===========================================================================
+  redis:
+    restart: always
+    ports: []  # 本番ではポートを外部に公開しない
+    # maxmemory: メモリ使用量の上限（256MB）
+    # maxmemory-policy allkeys-lru: メモリが上限に達したら、最も古いキーを削除
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # Ollama — 本番設定
+  # ===========================================================================
+  ollama:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
+        reservations:
+          memory: 2G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

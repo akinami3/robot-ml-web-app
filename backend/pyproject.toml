@@ -1,27 +1,22 @@
 # =============================================================================
-# Step 12: Python プロジェクト設定（RAG ライブラリ追加）
+# Step 13: Python プロジェクト設定（本番対応版）
 # =============================================================================
 #
-# 【Step 11 からの追加ライブラリ（Step 12）】
-# - httpx: 非同期HTTPクライアント（Ollama API 呼び出し用）
-# - pypdf: PDF テキスト抽出（ドキュメントアップロード用）
+# 【Step 12 からの変更点（Step 13）】
+# - バージョンを 1.0.0 に更新（本番リリース）
+# - gunicorn 依存を追加（本番用プロセスマネージャー）
 #
-# 【なぜ httpx？】
-# Ollama は HTTP API を提供するので、Python から呼び出すには HTTP クライアントが必要。
-# httpx は async/await 対応の高性能 HTTP クライアントで、FastAPI との相性が良い。
-# requests と API が似ているが、非同期処理に対応している点が異なる。
-#
-# 【なぜ pypdf？】
-# PDF ファイルからテキストを抽出するためのライブラリ。
-# RAG ではアップロードされた PDF のテキストを読み取り、
-# チャンクに分割してベクトル化する必要がある。
+# 【なぜ gunicorn？】
+# uvicorn は開発用には最適だが、本番では複数ワーカーを管理する
+# プロセスマネージャーが必要。gunicorn がその役割を担う。
+# gunicorn + uvicorn.workers.UvicornWorker の組み合わせが本番の定番。
 #
 # =============================================================================
 
 [project]
 name = "robot-backend"
-version = "0.5.0"
-description = "Robot AI Web App — FastAPI バックエンド（RAG対応）"
+version = "1.0.0"
+description = "Robot AI Web App — FastAPI バックエンド（本番対応）"
 requires-python = ">=3.11"
 
 dependencies = [
@@ -43,6 +38,8 @@ dependencies = [
     # --- Step 12: RAG ---
     "httpx>=0.27.0",             # 非同期HTTPクライアント（Ollama API用）
     "pypdf>=4.0.0",              # PDFテキスト抽出
+    # --- Step 13: 本番 ---
+    "gunicorn>=22.0.0",          # 本番用プロセスマネージャー
 ]
 
 [project.optional-dependencies]
