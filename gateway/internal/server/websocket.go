@@ -1,24 +1,26 @@
 // =============================================================================
-// Step 3: WebSocket サーバー（Adapter 統合版）
+// Step 5: WebSocket サーバー — Hub + Handler + Safety 統合版
 // =============================================================================
 //
-// 【このファイルの概要】
-// Step 2 では main.go にすべてのWebSocket処理が入っていた。
-// Step 3 では以下の変更を行う:
+// 【Step 4 からの変更点】
+// 1. Hub を使ったマルチクライアント対応
+// 2. Handler で安全パイプラインを統合
+// 3. readPump / writePump を Client 単位に分離
+// 4. センサーデータの Hub 経由ブロードキャスト
+// 5. 接続時のクライアントID生成
 //
-//   1. WebSocket 処理を server パッケージに分離（責任の分離）
-//   2. Adapter パターンを統合（モックデータ → Adapter のセンサーデータ）
-//   3. コマンドを Adapter に委譲（直接ログ出力 → Adapter.SendCommand）
+// 【アーキテクチャの変化】
 //
-// 【パッケージ分離のメリット】
-// - main.go はエントリーポイントに専念（配線のみ）
-// - server パッケージは WebSocket 通信に専念
-// - adapter パッケージはロボット制御に専念
-// → 各パッケージが1つの責任だけを持つ = 単一責任の原則 (SRP)
+// Step 4:
+//   Client ── 1:1 ── Server ── Adapter
 //
-// 【Step 2 からの進化】
-// Step 2: generateMockSensorMessage() で固定的なランダムデータ
-// Step 3: adapter.SensorDataChannel() からリアルなストリームデータ
+// Step 5:
+//   Client A ──┐
+//              ├── Hub ── Handler ── Safety Pipeline ── Adapter
+//   Client B ──┘
+//              ↑
+//          Broadcast
+//          (Sensor)
 //
 // =============================================================================
 package server
@@ -29,53 +31,74 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/robot-ai-webapp/gateway/internal/adapter"
 	"github.com/robot-ai-webapp/gateway/internal/protocol"
+	"github.com/robot-ai-webapp/gateway/internal/safety"
 )
 
 // =============================================================================
-// Server 構造体
+// clientCounter — 一意なクライアントIDの生成用
 // =============================================================================
 //
-// 【構造体に依存性を注入する】
-// Server は adapter.RobotAdapter を「受け取る」設計。
-// どのアダプターを使うかは main.go が決める。
-// これが「依存性注入（Dependency Injection）」の実践。
+// 【atomic.Int64 とは？】
+// 複数の goroutine から安全にインクリメントできるカウンター。
+// sync/atomic パッケージが提供する低レベル同期プリミティブ。
 //
-//   main.go:  mockAdapter を作って Server に渡す
-//   Server:   渡されたアダプターを使う（中身は気にしない）
-//
-// 将来、本物のロボットアダプターを作っても、Server は変更不要。
+// mutex を使わずにスレッドセーフなカウンターを実現できる。
+// 用途: ユニークID生成、統計カウンターなど。
+var clientCounter atomic.Int64
+
+// =============================================================================
+// Server 構造体（Step 5 版）
+// =============================================================================
 type Server struct {
 	adapter  adapter.RobotAdapter
+	hub      *Hub
+	handler  *Handler
+	estop    *safety.EStopManager
+	watchdog *safety.TimeoutWatchdog
 	codec    protocol.Codec
 	upgrader websocket.Upgrader
 	port     string
 }
 
 // =============================================================================
-// NewServer — サーバーのコンストラクタ
+// NewServer — サーバーのコンストラクタ（Step 5 版）
 // =============================================================================
 //
-// 【引数の設計】
-// adapter: どのロボットアダプターを使うか（外から注入）
-// port:    リッスンポート（":8080" 形式）
+// 【引数が増えた理由】
+// Step 4: adapter と port だけ
+// Step 5: 安全コンポーネント（estop, limiter, watchdog, opLock）も受け取る
 //
-// 【Upgrader の設定】
-// ReadBufferSize / WriteBufferSize: WebSocket のバッファサイズ。
-// CheckOrigin: 本番では厳密に設定すべきだが、開発中は全許可。
-func NewServer(robotAdapter adapter.RobotAdapter, port string) *Server {
+// これは「依存性が増えた」ことを意味する。
+// Step 6 以降ではさらに増えるため、将来的には Config 構造体にまとめる。
+func NewServer(
+	robotAdapter adapter.RobotAdapter,
+	hub *Hub,
+	estop *safety.EStopManager,
+	limiter *safety.VelocityLimiter,
+	watchdog *safety.TimeoutWatchdog,
+	opLock *safety.OperationLock,
+	port string,
+) *Server {
+	handler := NewHandler(robotAdapter, estop, limiter, watchdog, opLock, hub)
+
 	return &Server{
-		adapter: robotAdapter,
-		codec:   protocol.NewJSONCodec(),
+		adapter:  robotAdapter,
+		hub:      hub,
+		handler:  handler,
+		estop:    estop,
+		watchdog: watchdog,
+		codec:    protocol.NewJSONCodec(),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 			CheckOrigin: func(r *http.Request) bool {
-				return true // 開発用: 全オリジン許可
+				return true
 			},
 		},
 		port: port,
@@ -85,72 +108,72 @@ func NewServer(robotAdapter adapter.RobotAdapter, port string) *Server {
 // =============================================================================
 // Start — サーバーを起動
 // =============================================================================
-//
-// 【context.Context を受け取る理由】
-// 将来的に graceful shutdown（優雅な停止）をしたいとき、
-// ctx のキャンセルでサーバーを停止できる。
-// Step 3 では使わないが、良い習慣として引数に含める。
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.HandleFunc("/health", s.handleHealth)
 
-	// --- ヘルスチェック ---
-	// Docker Compose の healthcheck や監視で使うシンプルなエンドポイント
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		status := map[string]any{
-			"status":    "ok",
-			"adapter":   s.adapter.Name(),
-			"connected": s.adapter.IsConnected(),
-		}
-		json.NewEncoder(w).Encode(status)
-	})
+	// --- Hub のイベントループを開始 ---
+	go s.hub.Run()
 
-	log.Printf("🚀 WebSocket サーバー起動 (Step 3: Adapter パターン)")
+	// --- センサーデータの Hub 経由ブロードキャスト開始 ---
+	go s.sensorBroadcastLoop(ctx)
+
+	// --- ウォッチドッグ開始 ---
+	go s.watchdog.Start(ctx)
+
+	log.Printf("🚀 WebSocket サーバー起動 (Step 5: 安全パイプライン)")
 	log.Printf("   エンドポイント: ws://localhost%s/ws", s.port)
 	log.Printf("   ヘルス: http://localhost%s/health", s.port)
 	log.Printf("   アダプター: %s", s.adapter.Name())
+	log.Printf("   E-Stop: %v", s.estop.IsActive())
 	log.Printf("   Ctrl+C で停止")
 
 	return http.ListenAndServe(s.port, mux)
 }
 
 // =============================================================================
-// handleWebSocket — WebSocket 接続のハンドラー
+// handleWebSocket — 新規 WebSocket 接続の処理
 // =============================================================================
 //
-// 【Step 2 からの変更点】
-// s.upgrader を使う（メソッドレシーバ経由でアクセス）
+// 【Step 4 との違い】
+// Step 4: 直接 readPump/writePump を起動
+// Step 5: Client を作成して Hub に登録 → Client の WritePump を起動
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("WebSocket アップグレード失敗:", err)
 		return
 	}
-	defer conn.Close()
 
-	log.Println("✅ 新しいクライアントが接続しました")
+	// --- クライアントIDの生成 ---
+	clientID := fmt.Sprintf("client-%d", clientCounter.Add(1))
 
-	// 接続時にアダプターの情報を送信
-	s.sendAdapterInfo(conn)
+	// --- Client をHub に登録 ---
+	client := NewClient(clientID, conn, s.hub)
+	s.hub.Register(client)
 
-	done := make(chan struct{})
-	go s.writePump(conn, done)
-	s.readPump(conn, done)
+	log.Printf("✅ 新しいクライアント: %s", clientID)
 
-	log.Println("❌ クライアントが切断しました")
+	// --- 接続時の初期情報を送信 ---
+	s.sendAdapterInfo(client)
+
+	// --- WritePump を goroutine で起動 ---
+	go client.WritePump()
+
+	// --- ReadPump はこの goroutine で実行（ブロッキング） ---
+	s.readPump(client)
+
+	// --- 切断処理 ---
+	s.hub.Unregister(client)
+	conn.Close()
+	log.Printf("❌ クライアント切断: %s", clientID)
 }
 
 // =============================================================================
-// sendAdapterInfo — 接続時にアダプター情報を送信
+// sendAdapterInfo — 接続時にアダプター情報を Client に送信
 // =============================================================================
-//
-// 【接続直後に情報を送る理由】
-// クライアントがロボットの状態を知るために、接続直後に情報を送る。
-// - どのロボットに接続しているか
-// - ロボットの能力（速度制限など）
-// - 接続状態
-func (s *Server) sendAdapterInfo(conn *websocket.Conn) {
+func (s *Server) sendAdapterInfo(client *Client) {
 	caps := s.adapter.GetCapabilities()
 	info := protocol.Message{
 		Type:      "adapter_info",
@@ -167,205 +190,135 @@ func (s *Server) sendAdapterInfo(conn *websocket.Conn) {
 				"max_angular":     caps.MaxAngularVelocity,
 				"sensor_topics":   caps.SensorTopics,
 			},
+			// Step 5 追加: 安全状態も含める
+			"estop_active": s.estop.IsActive(),
 		},
 	}
-	s.sendMessage(conn, info)
+
+	data, err := s.codec.Encode(info)
+	if err != nil {
+		log.Printf("⚠️ adapter_info エンコードエラー: %v", err)
+		return
+	}
+
+	select {
+	case client.send <- data:
+	default:
+		log.Printf("⚠️ Client %s のバッファフル（adapter_info 送信失敗）", client.ID)
+	}
 }
 
 // =============================================================================
-// readPump — クライアントからのメッセージを受信・処理
+// readPump — クライアントからのメッセージを読み取り Handler に委譲
 // =============================================================================
 //
-// 【Step 2 からの変更点】
-// - velocity_cmd → adapter.SendCommand に委譲
-// - estop メッセージ → adapter.EmergencyStop に委譲
-// - "connect" / "disconnect" コマンドを追加
-func (s *Server) readPump(conn *websocket.Conn, done chan struct{}) {
-	defer close(done)
+// 【Step 4 との違い】
+// Step 4: switch 文で直接メッセージを処理
+// Step 5: Handler.HandleMessage() に委譲（責任の分離）
+func (s *Server) readPump(client *Client) {
+	// Pong ハンドラ: クライアントからの Pong メッセージで読み取りデッドラインを延長
+	client.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	client.conn.SetPongHandler(func(string) error {
+		client.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
 
 	for {
-		_, message, err := conn.ReadMessage()
+		_, message, err := client.conn.ReadMessage()
 		if err != nil {
-			log.Println("読み取りエラー:", err)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				log.Printf("⚠️ [%s] 予期しない切断: %v", client.ID, err)
+			}
 			return
 		}
 
 		msg, err := s.codec.Decode(message)
 		if err != nil {
-			log.Println("⚠️ デコードエラー:", err)
+			log.Printf("⚠️ [%s] デコードエラー: %v", client.ID, err)
 			errMsg := protocol.NewError(400, fmt.Sprintf("メッセージの解析に失敗: %v", err))
-			s.sendMessage(conn, errMsg)
+			data, _ := s.codec.Encode(errMsg)
+			select {
+			case client.send <- data:
+			default:
+			}
 			continue
 		}
 
-		log.Printf("📨 受信: type=%s, robot_id=%s", msg.Type, msg.RobotID)
-
-		// --- メッセージの Type に応じた処理 ---
-		switch msg.Type {
-		case protocol.TypeVelocityCmd:
-			s.handleVelocityCmd(conn, msg)
-
-		case "estop":
-			s.handleEStop(conn)
-
-		case "connect":
-			s.handleConnect(conn)
-
-		case "disconnect":
-			s.handleDisconnect(conn)
-
-		default:
-			log.Printf("⚠️ 未対応のメッセージタイプ: %s", msg.Type)
-			errMsg := protocol.NewError(404, fmt.Sprintf("未対応のメッセージタイプ: %s", msg.Type))
-			s.sendMessage(conn, errMsg)
-		}
+		// Handler に委譲
+		s.handler.HandleMessage(client.ID, msg)
 	}
 }
 
 // =============================================================================
-// handleVelocityCmd — velocity_cmd メッセージを Adapter 経由で処理
+// sensorBroadcastLoop — センサーデータを Hub 経由で全クライアントに配信
 // =============================================================================
 //
-// 【Step 2 からの変更点】
-// Step 2: ログ出力して ack を返すだけ
-// Step 3: adapter.SendCommand() でアダプターに委譲
-//         → MockAdapter が内部速度を更新 → センサーデータに反映
-func (s *Server) handleVelocityCmd(conn *websocket.Conn, msg protocol.Message) {
-	payload, ok := msg.Payload.(protocol.VelocityPayload)
-	if !ok {
-		log.Println("⚠️ velocity_cmd のペイロードが不正")
-		errMsg := protocol.NewError(400, "velocity_cmd のペイロード形式が不正です")
-		s.sendMessage(conn, errMsg)
-		return
-	}
-
-	// Adapter に速度コマンドを送信
-	cmd := adapter.Command{
-		Type: "velocity",
-		Payload: map[string]any{
-			"linear_x":  payload.LinearX,
-			"linear_y":  payload.LinearY,
-			"angular_z": payload.AngularZ,
-		},
-	}
-
-	if err := s.adapter.SendCommand(context.Background(), cmd); err != nil {
-		log.Printf("⚠️ コマンド送信エラー: %v", err)
-		errMsg := protocol.NewError(500, fmt.Sprintf("コマンド送信失敗: %v", err))
-		s.sendMessage(conn, errMsg)
-		return
-	}
-
-	// --- コマンド成功の応答 ---
-	description := describeVelocity(payload)
-	ack := protocol.NewCommandAck("robot-01", "executing", description)
-	s.sendMessage(conn, ack)
-}
-
-// =============================================================================
-// handleEStop — 緊急停止
-// =============================================================================
-func (s *Server) handleEStop(conn *websocket.Conn) {
-	if err := s.adapter.EmergencyStop(context.Background()); err != nil {
-		log.Printf("⚠️ 緊急停止エラー: %v", err)
-		errMsg := protocol.NewError(500, fmt.Sprintf("緊急停止失敗: %v", err))
-		s.sendMessage(conn, errMsg)
-		return
-	}
-
-	ack := protocol.NewCommandAck("robot-01", "stopped", "緊急停止を実行しました")
-	s.sendMessage(conn, ack)
-}
-
-// =============================================================================
-// handleConnect / handleDisconnect — アダプター接続管理
-// =============================================================================
-func (s *Server) handleConnect(conn *websocket.Conn) {
-	if err := s.adapter.Connect(context.Background(), nil); err != nil {
-		log.Printf("⚠️ 接続エラー: %v", err)
-		errMsg := protocol.NewError(500, fmt.Sprintf("接続失敗: %v", err))
-		s.sendMessage(conn, errMsg)
-		return
-	}
-
-	ack := protocol.NewCommandAck("robot-01", "connected", "ロボットに接続しました")
-	s.sendMessage(conn, ack)
-}
-
-func (s *Server) handleDisconnect(conn *websocket.Conn) {
-	if err := s.adapter.Disconnect(context.Background()); err != nil {
-		log.Printf("⚠️ 切断エラー: %v", err)
-		errMsg := protocol.NewError(500, fmt.Sprintf("切断失敗: %v", err))
-		s.sendMessage(conn, errMsg)
-		return
-	}
-
-	ack := protocol.NewCommandAck("robot-01", "disconnected", "ロボットから切断しました")
-	s.sendMessage(conn, ack)
-}
-
-// =============================================================================
-// writePump — Adapter のセンサーデータを WebSocket 経由で送信
-// =============================================================================
+// 【Step 4 との違い】
+// Step 4: writePump が直接 conn に書き込み
+// Step 5: Hub.Broadcast() で全クライアントに配信
 //
-// 【Step 2 からの大きな変更】
-// Step 2: ticker で1秒ごとにランダムデータを生成
-// Step 3: adapter.SensorDataChannel() からリアルタイムデータを受信
-//
-// MockAdapter は 20Hz でオドメトリ、5秒ごとにバッテリーを送信。
-// writePump はそれをそのまま WebSocket クライアントに転送する。
-//
-// 【チャネルからの受信と select】
-// adapter.SensorDataChannel() は <-chan SensorData（受信専用チャネル）。
-// select で done チャネルとセンサーデータチャネルを同時に待機する。
-func (s *Server) writePump(conn *websocket.Conn, done chan struct{}) {
-	// Adapter のセンサーデータチャネルを取得
+// これにより、新しいクライアントが接続しても
+// 追加のgoroutineを起動する必要がない。
+func (s *Server) sensorBroadcastLoop(ctx context.Context) {
 	sensorCh := s.adapter.SensorDataChannel()
 
 	for {
 		select {
-		case <-done:
-			log.Println("writePump 停止（クライアント切断）")
+		case <-ctx.Done():
+			log.Println("センサーブロードキャスト停止")
 			return
 
 		case data, ok := <-sensorCh:
 			if !ok {
-				// チャネルが閉じられた
 				log.Println("センサーデータチャネルが閉じられました")
 				return
 			}
 
-			// SensorData → protocol.Message に変換して送信
 			msg := sensorDataToMessage(data)
-			s.sendMessage(conn, msg)
+			s.hub.Broadcast(msg)
 		}
 	}
 }
 
 // =============================================================================
-// sensorDataToMessage — adapter.SensorData を protocol.Message に変換
+// sensorDataToMessage — adapter.SensorData → protocol.Message 変換
 // =============================================================================
-//
-// 【パッケージ間の変換】
-// adapter パッケージの SensorData と protocol パッケージの Message は
-// 別のパッケージに属する別の型。型変換（mapping）が必要。
-//
-// なぜ adapter.SensorData をそのまま WebSocket に送らない？
-// → protocol パッケージが定める「通信フォーマット」に合わせるため。
-// → 内部データ構造と外部通信フォーマットを分離する設計。
 func sensorDataToMessage(data adapter.SensorData) protocol.Message {
 	return protocol.Message{
 		Type:      protocol.TypeSensorData,
 		RobotID:   data.RobotID,
 		Timestamp: time.Unix(0, data.Timestamp),
-		Payload:   data.Data, // map[string]any をそのまま渡す
+		Payload:   data.Data,
 	}
 }
 
 // =============================================================================
-// describeVelocity — 速度コマンドを人間が読みやすい文字列に変換
+// handleHealth — ヘルスチェックエンドポイント（Step 5 拡張）
 // =============================================================================
-// Step 2 から移植。変更なし。
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	maxLin, maxAng := s.handler.limiter.GetLimits()
+
+	status := map[string]any{
+		"status":    "ok",
+		"adapter":   s.adapter.Name(),
+		"connected": s.adapter.IsConnected(),
+		"safety": map[string]any{
+			"estop_active": s.estop.IsActive(),
+			"velocity_limits": map[string]any{
+				"max_linear":  maxLin,
+				"max_angular": maxAng,
+			},
+		},
+		"clients": s.hub.ClientCount(),
+	}
+	json.NewEncoder(w).Encode(status)
+}
+
+// =============================================================================
+// describeVelocity — 速度コマンドの説明文を生成
+// =============================================================================
 func describeVelocity(v protocol.VelocityPayload) string {
 	if v.LinearX == 0 && v.LinearY == 0 && v.AngularZ == 0 {
 		return "停止"
@@ -391,20 +344,4 @@ func describeVelocity(v protocol.VelocityPayload) string {
 	}
 
 	return desc
-}
-
-// =============================================================================
-// sendMessage — 構造化メッセージをエンコードして送信
-// =============================================================================
-func (s *Server) sendMessage(conn *websocket.Conn, msg protocol.Message) {
-	data, err := s.codec.Encode(msg)
-	if err != nil {
-		log.Println("エンコードエラー:", err)
-		return
-	}
-
-	err = conn.WriteMessage(websocket.TextMessage, data)
-	if err != nil {
-		log.Println("送信エラー:", err)
-	}
 }

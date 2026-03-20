@@ -1,69 +1,52 @@
 <!DOCTYPE html>
 <!--
   =============================================================================
-  Step 4: センサー可視化ダッシュボード
+  Step 5: 安全パイプライン — フロントエンド
   =============================================================================
 
-  【Step 3 からの変更点】
-  1. CSS を外部ファイルに分離（css/style.css）
-  2. WebSocketClient クラスで接続管理を抽象化
-  3. LiDAR データの Canvas 2D による極座標プロット
-  4. IMU データのリングバッファ式リアルタイムチャート
-  5. バッテリーゲージを SVG 円形ゲージに変更
-  6. オドメトリにミニマップ（軌跡描画）を追加
-  7. ダッシュボードを auto-fill グリッドレイアウトに変更
+  【Step 4 からの変更点】
+  1. 安全パネルの追加（E-Stop 状態、速度制限表示）
+  2. E-Stop 解除ボタンの追加
+  3. safety_status メッセージへの対応
+  4. E-Stop アクティブ時の視覚的フィードバック
 
   【ファイル構成】
-  Step 4:
+  Step 5:
     ├── index.html              ← このファイル
     ├── css/
-    │   └── style.css           ← 外部CSS（HTML から分離）
+    │   └── style.css           ← Step 4 + 安全UI のスタイル追加
     └── js/
-        ├── protocol-base.js    ← Step 2 から引き続き
-        ├── protocol.js         ← Step 3 から引き続き
-        ├── websocket-client.js ← WebSocket 接続をクラスで管理
-        ├── app.js              ← メインアプリ（Step 4 版）
-        └── sensors/
-            ├── lidar-viewer.js   ← LiDAR 2D ポーラープロット
-            ├── imu-chart.js      ← IMU 6軸リアルタイムチャート
-            ├── battery-gauge.js  ← SVG バッテリーゲージ
-            └── odometry.js       ← オドメトリ軌跡マップ
-
-  【外部CSSにする理由】
-  Step 3 までは <style> タグでインライン記述していた。
-  コードが大きくなると、HTML と CSS を分離したほうが:
-    - 見通しが良い
-    - ブラウザキャッシュが効く
-    - チームでの分業がしやすい
+        ├── protocol-base.js
+        ├── protocol.js         ← estop_release, status 追加
+        ├── websocket-client.js
+        ├── app.js              ← safety_status 対応 + E-Stop UI
+        └── sensors/            ← Step 4 と同じ
   =============================================================================
 -->
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Step 4: センサー可視化 🤖</title>
-  <!-- 外部 CSS の読み込み -->
+  <title>Step 5: 安全パイプライン 🛡️</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 
 <body>
-  <h1>🤖 Step 4: センサー可視化ダッシュボード</h1>
+  <h1>🛡️ Step 5: 安全パイプライン</h1>
 
-  <!-- 説明テキスト -->
   <div class="help">
-    💡 <strong>Step 4 の新機能:</strong> 4種のセンサーを Canvas / SVG でリアルタイム描画<br>
-    MockAdapter が LiDAR (10Hz), IMU (50Hz), Odometry (10Hz), Battery (1Hz) を生成。<br>
-    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> でロボットを動かすと、LiDAR とオドメトリが変化します！
+    💡 <strong>Step 5 の新機能:</strong> E-Stop / 速度制限 / タイムアウト監視 / 排他ロック<br>
+    安全パイプライン: コマンドは E-Stop → 速度制限 → アダプターの順でチェック。<br>
+    E-Stop 発動中は <kbd>WASD</kbd> コマンドが拒否されます。解除ボタンで復帰。
   </div>
 
-  <!-- ============================================================
-       接続状態 + コントロール
-       ============================================================ -->
+  <!-- 接続状態 -->
   <div class="status">
     <div id="statusDot" class="status-dot"></div>
     <span id="statusText">未接続</span>
   </div>
 
+  <!-- コントロールボタン -->
   <div class="controls">
     <button id="btnConnect" class="btn-connect" onclick="connectWebSocket()">
       🔌 WS接続
@@ -83,51 +66,63 @@
     </button>
   </div>
 
-  <!-- アダプター情報 + E-Stop -->
-  <div class="adapter-info">
-    <div class="info-item">
-      <div class="info-label">アダプター</div>
-      <div class="info-value" id="adapterName">--</div>
+  <!-- ============================================================
+       安全パネル（Step 5 新規）
+       ============================================================
+       E-Stop の状態と速度制限を常に表示する。
+       ロボットが稼働中は常に安全状態を視認できるようにする。
+       ============================================================ -->
+  <div class="safety-panel">
+    <div class="safety-header">
+      <h3>🛡️ 安全パネル</h3>
     </div>
-    <div class="info-item">
-      <div class="info-label">ロボット状態</div>
-      <div class="info-value" id="robotStatus">🔴 未接続</div>
+    <div class="safety-grid">
+      <!-- E-Stop 状態 -->
+      <div class="safety-item">
+        <div id="estopIndicator" class="estop-indicator">✅ 正常</div>
+      </div>
+
+      <!-- E-Stop / 解除ボタン -->
+      <div class="safety-item safety-buttons">
+        <button id="btnEStop" class="btn-estop" onclick="sendEStop()" disabled title="緊急停止">
+          🛑 E-STOP
+        </button>
+        <button id="btnEStopRelease" class="btn-estop-release" onclick="sendEStopRelease()" disabled title="E-Stop 解除">
+          ✅ 解除
+        </button>
+      </div>
+
+      <!-- 速度制限 -->
+      <div class="safety-item">
+        <div class="safety-label">速度制限</div>
+        <div id="velocityLimits" class="safety-value">-- m/s | -- rad/s</div>
+      </div>
+
+      <!-- アダプター情報 -->
+      <div class="safety-item">
+        <div class="safety-label">アダプター</div>
+        <div id="adapterName" class="safety-value">--</div>
+      </div>
+
+      <div class="safety-item">
+        <div class="safety-label">ロボット状態</div>
+        <div id="robotStatus" class="safety-value">🔴 未接続</div>
+      </div>
     </div>
-    <button id="btnEStop" class="btn-estop" onclick="sendEStop()" disabled title="緊急停止">
-      🛑<br><small>E-STOP</small>
-    </button>
   </div>
 
-  <!-- ============================================================
-       センサーダッシュボード
-       ============================================================
-       【CSS Grid: auto-fill + minmax】
-       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-       → コンテナの幅に応じて自動的にカラム数を調整する。
-       300px 以上なら 1fr（均等幅）に拡大する。
-       画面幅が狭ければ 1 列、広ければ 2〜3 列に自動配置。
-       ============================================================ -->
+  <!-- センサーダッシュボード（Step 4 と同じ構造） -->
   <div class="dashboard-grid">
-
-    <!-- ===== LiDAR カード ===== -->
     <div class="sensor-card">
       <div class="card-header">
         <h3>📡 LiDAR</h3>
         <span class="card-badge" id="lidarHz">0 Hz</span>
       </div>
       <div class="canvas-container">
-        <!--
-          【Canvas 要素】
-          <canvas> は HTML5 で追加された描画用要素。
-          width/height 属性は描画解像度（ピクセル数）。
-          CSS の width/height は表示サイズ。
-          この 2 つが異なると拡大/縮小される（ぼやけの原因にもなる）。
-        -->
         <canvas id="lidarCanvas" width="400" height="400"></canvas>
       </div>
     </div>
 
-    <!-- ===== IMU カード ===== -->
     <div class="sensor-card">
       <div class="card-header">
         <h3>🧭 IMU（慣性計測装置）</h3>
@@ -139,7 +134,6 @@
       <div id="imuLegend"></div>
     </div>
 
-    <!-- ===== オドメトリ カード ===== -->
     <div class="sensor-card">
       <div class="card-header">
         <h3>📍 オドメトリ</h3>
@@ -151,7 +145,6 @@
       <div id="odomValues"></div>
     </div>
 
-    <!-- ===== バッテリー カード ===== -->
     <div class="sensor-card">
       <div class="card-header">
         <h3>🔋 バッテリー</h3>
@@ -160,7 +153,6 @@
       <div id="batteryGauge"></div>
     </div>
 
-    <!-- ===== WASD キーボード カード ===== -->
     <div class="sensor-card">
       <div class="card-header">
         <h3>🎮 キーボード操作</h3>
@@ -178,14 +170,11 @@
     </div>
   </div>
 
-  <!-- ============================================================
-       メッセージログ
-       ============================================================ -->
+  <!-- メッセージログ -->
   <h2>📋 メッセージログ</h2>
   <div id="messages" class="messages"></div>
   <div id="counter" class="counter">送信: 0 | 受信: 0</div>
 
-  <!-- JavaScript（ES Modules） -->
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>

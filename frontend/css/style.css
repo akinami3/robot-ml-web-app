@@ -1,15 +1,13 @@
 /* =============================================================================
-   Step 4: センサー可視化 — スタイルシート
+   Step 5: 安全パイプライン — スタイルシート
    =============================================================================
 
-   【Step 3 からの変更点】
-   Step 3: index.html の <style> タグ内にすべてのCSSを記述
-   Step 4: 外部CSSファイルに分離 → HTML がすっきりする
+   【Step 4 からの変更点】
+   1. 安全パネル（.safety-panel）の追加
+   2. E-Stop インジケータのスタイル
+   3. E-Stop 解除ボタンのスタイル
+   4. 安全状態のグリッド表示
 
-   【CSSファイル分離のメリット】
-   1. ブラウザがCSSファイルをキャッシュ → ページ読み込みが速くなる
-   2. HTMLとCSSの責任が分離 → 保守しやすくなる
-   3. 複数ページからCSSを再利用できる
    ============================================================================= */
 
 /* ===== リセット & 基本スタイル ===== */
@@ -26,9 +24,10 @@ body {
 
 h1 { color: #00d4ff; border-bottom: 2px solid #00d4ff; padding-bottom: 10px; font-size: 1.4em; margin: 0 0 16px; }
 h2 { color: #00d4ff; font-size: 1.05em; margin: 12px 0 6px; }
+h3 { margin: 0; font-size: 1em; }
 
-/* ===== 接続状態バー ===== */
-.status-bar {
+/* ===== 接続状態 ===== */
+.status {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -36,7 +35,6 @@ h2 { color: #00d4ff; font-size: 1.05em; margin: 12px 0 6px; }
   border-radius: 8px;
   background-color: #16213e;
   margin-bottom: 12px;
-  flex-wrap: wrap;
 }
 
 .status-dot {
@@ -72,29 +70,6 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   color: #1a1a2e;
 }
 
-/* ===== E-Stop ===== */
-.btn-estop {
-  background-color: #dc3545;
-  color: white;
-  font-size: 14px;
-  padding: 12px 20px;
-  border-radius: 50%;
-  border: 3px solid #ff6b6b;
-  box-shadow: 0 0 15px rgba(220, 53, 69, 0.3);
-  min-width: 64px;
-  min-height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  line-height: 1.2;
-}
-.btn-estop:hover:not(:disabled) {
-  background-color: #ff1a1a;
-  box-shadow: 0 0 25px rgba(220, 53, 69, 0.6);
-  transform: scale(1.05);
-}
-
 .btn-robot-connect { background-color: #17a2b8; color: white; }
 .btn-robot-disconnect { background-color: #6c757d; color: white; }
 
@@ -106,15 +81,127 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   align-items: center;
 }
 
-/* ===== メインダッシュボードグリッド ===== */
+/* ===================================================================
+   安全パネル（Step 5 新規）
+   ===================================================================
+   ロボットの安全状態を常に表示するパネル。
+   E-Stop の状態、速度制限、操作ロック状態を一目で確認できる。
+   赤い枠線で目立たせ、安全に関するUIであることを視覚的に伝える。
+   =================================================================== */
+.safety-panel {
+  background-color: #16213e;
+  border: 2px solid #2a2a4e;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.safety-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #2a2a4e;
+}
+
+.safety-header h3 {
+  color: #ffd700;
+}
+
+.safety-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.safety-item {
+  text-align: center;
+}
+
+.safety-label {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.safety-value {
+  font-size: 13px;
+  font-weight: bold;
+  color: #ffd700;
+  font-family: monospace;
+}
+
+/* ===== E-Stop インジケータ ===== */
 /*
-  【CSS Grid で複雑なレイアウトを組む】
-  センサーをタイル状に自動配置する。
-  auto-fill + minmax で、画面幅に応じて列数が自動調整される。
+  【状態に応じたスタイル変更】
+  .estop-indicator        → 正常時（緑系）
+  .estop-indicator.active → E-Stop アクティブ時（赤系 + 点滅）
   
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr))
-    → 最小 280px、最大で均等分配。画面が広ければ3列、狭ければ1列。
+  @keyframes で点滅アニメーションを定義。
+  attention-grabbing であることが最重要。
 */
+.estop-indicator {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: bold;
+  font-size: 14px;
+  background-color: #1a3a2a;
+  color: #28a745;
+  border: 2px solid #28a745;
+  transition: all 0.3s;
+}
+
+.estop-indicator.active {
+  background-color: #3a1a1a;
+  color: #ff4444;
+  border-color: #ff4444;
+  animation: estop-blink 1s ease-in-out infinite;
+}
+
+@keyframes estop-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ===== E-Stop ボタン ===== */
+.btn-estop {
+  background-color: #dc3545;
+  color: white;
+  font-size: 14px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 3px solid #ff6b6b;
+  box-shadow: 0 0 15px rgba(220, 53, 69, 0.3);
+}
+.btn-estop:hover:not(:disabled) {
+  background-color: #ff1a1a;
+  box-shadow: 0 0 25px rgba(220, 53, 69, 0.6);
+  transform: scale(1.05);
+}
+
+.btn-estop-release {
+  background-color: #28a745;
+  color: white;
+  font-size: 14px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 3px solid #5cb85c;
+}
+.btn-estop-release:hover:not(:disabled) {
+  background-color: #34c759;
+  box-shadow: 0 0 15px rgba(40, 167, 69, 0.4);
+}
+
+.safety-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+/* ===== ダッシュボードグリッド === */
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -122,7 +209,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-bottom: 12px;
 }
 
-/* ===== センサーカード（各センサーの共通コンテナ） ===== */
+/* ===== センサーカード ===== */
 .sensor-card {
   background-color: #16213e;
   border-radius: 8px;
@@ -138,25 +225,16 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-bottom: 8px;
 }
 
-.sensor-card .card-title {
-  font-size: 13px;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.sensor-card .card-freq {
+.card-badge {
   font-size: 11px;
-  color: #555;
+  color: #28a745;
+  background-color: #1a3a2a;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-family: monospace;
 }
 
 /* ===== Canvas コンテナ ===== */
-/*
-  【canvas の応答性】
-  canvas 要素はCSSの width/height と、属性の width/height が別物。
-  CSS = 表示サイズ、属性 = 描画解像度。
-  ここではCSS で100%にして、JS 側で解像度を合わせる。
-*/
 .canvas-container {
   width: 100%;
   position: relative;
@@ -169,7 +247,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-radius: 4px;
 }
 
-/* ===== 値表示カード（オドメトリ用小カード） ===== */
+/* ===== 値表示グリッド ===== */
 .value-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -183,7 +261,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   padding: 8px;
 }
 
-.value-item .label {
+.value-label {
   font-size: 11px;
   color: #888;
   text-transform: uppercase;
@@ -191,52 +269,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-bottom: 4px;
 }
 
-.value-item .value {
-  font-size: 18px;
+.value-num {
+  font-size: 14px;
   font-weight: bold;
   color: #00d4ff;
   font-family: 'Cascadia Code', 'Fira Code', monospace;
 }
 
-/* ===== バッテリーバー ===== */
-.battery-bar-container {
-  width: 100%;
-  height: 16px;
-  background-color: #0f0f23;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid #333;
-}
-
-.battery-bar {
-  height: 100%;
-  background-color: #28a745;
-  border-radius: 8px;
-  transition: width 0.5s ease, background-color 0.5s ease;
-  width: 0%;
-}
-
-.battery-value {
-  font-size: 32px;
-  font-weight: bold;
-  color: #00d4ff;
-  font-family: 'Cascadia Code', monospace;
-  text-align: center;
-  margin-bottom: 8px;
-}
-
-.battery-details {
-  display: flex;
-  justify-content: space-around;
-  margin-top: 8px;
-  font-size: 12px;
-}
-
-.battery-details .label { color: #888; }
-.battery-details .value { color: #00d4ff; font-family: monospace; }
-
 /* ===== WASD キーボード ===== */
-.keyboard-panel {
+.keyboard {
   background-color: #0f0f23;
   border-radius: 6px;
   padding: 12px;
@@ -290,27 +331,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   min-height: 1.2em;
 }
 
-/* ===== アダプター情報 ===== */
-.adapter-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background-color: #16213e;
-  border: 1px solid #2a2a4e;
-  border-radius: 8px;
-  padding: 8px 16px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.adapter-bar .info-item { text-align: center; }
-.adapter-bar .info-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-.adapter-bar .info-value { font-size: 14px; font-weight: bold; color: #ffd700; }
-
 /* ===== メッセージログ ===== */
-.messages-section { margin-top: 12px; }
-
 .messages {
   background-color: #0f0f23;
   border: 1px solid #333;
@@ -351,7 +372,6 @@ kbd {
 
 /* ===== レスポンシブ ===== */
 @media (max-width: 600px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .safety-grid { flex-direction: column; align-items: stretch; }
 }

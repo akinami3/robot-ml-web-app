@@ -1,11 +1,11 @@
 // =============================================================================
-// Step 3: Adapter パターン — protocol.js
+// Step 5: 安全パイプライン — protocol.js（拡張版）
 // =============================================================================
 //
-// 【Step 2 からの変更点】
-// 1. adapter_info メッセージタイプを追加
-// 2. estop / connect / disconnect メッセージ作成関数を追加
-// 3. formatSensorData を Adapter 形式に対応
+// 【Step 4 からの変更点】
+// 1. safety_status メッセージタイプを追加
+// 2. estop_release メッセージ作成関数を追加
+// 3. status（安全状態問い合わせ）メッセージ作成関数を追加
 //
 // =============================================================================
 import {
@@ -17,24 +17,24 @@ import {
 } from "./protocol-base.js";
 
 // =============================================================================
-// メッセージタイプ定数（Step 3 で追加分を含む）
+// メッセージタイプ定数（Step 5 追加分）
 // =============================================================================
-//
-// 【スプレッド構文 ...obj とは？】
-// オブジェクトの全プロパティを展開して新しいオブジェクトに入れる。
-// { ...Step2Types } → Step2Types の全プロパティをコピー。
-// そこに新しいプロパティを追加して拡張する。
 export const MessageType = Object.freeze({
   ...Step2Types,
-  ADAPTER_INFO: "adapter_info",   // サーバー → クライアント: アダプター情報
-  ESTOP: "estop",                 // クライアント → サーバー: 緊急停止
-  CONNECT: "connect",             // クライアント → サーバー: ロボット接続
-  DISCONNECT: "disconnect",       // クライアント → サーバー: ロボット切断
+  ADAPTER_INFO: "adapter_info",
+  ESTOP: "estop",
+  CONNECT: "connect",
+  DISCONNECT: "disconnect",
+  // Step 5 追加
+  ESTOP_RELEASE: "estop_release",   // E-Stop 解除
+  SAFETY_STATUS: "safety_status",   // 安全状態通知
+  STATUS: "status",                 // 状態問い合わせ
 });
 
 // =============================================================================
-// createEStopCmd — 緊急停止コマンドを作成
+// メッセージ作成関数
 // =============================================================================
+
 export function createEStopCmd() {
   return {
     type: MessageType.ESTOP,
@@ -44,9 +44,16 @@ export function createEStopCmd() {
   };
 }
 
-// =============================================================================
-// createConnectCmd — ロボット接続コマンドを作成
-// =============================================================================
+// Step 5 新規: E-Stop 解除コマンド
+export function createEStopReleaseCmd() {
+  return {
+    type: MessageType.ESTOP_RELEASE,
+    robot_id: "robot-01",
+    timestamp: new Date().toISOString(),
+    payload: {},
+  };
+}
+
 export function createConnectCmd() {
   return {
     type: MessageType.CONNECT,
@@ -56,9 +63,6 @@ export function createConnectCmd() {
   };
 }
 
-// =============================================================================
-// createDisconnectCmd — ロボット切断コマンドを作成
-// =============================================================================
 export function createDisconnectCmd() {
   return {
     type: MessageType.DISCONNECT,
@@ -68,19 +72,19 @@ export function createDisconnectCmd() {
   };
 }
 
+// Step 5 新規: 安全状態の問い合わせ
+export function createStatusCmd() {
+  return {
+    type: MessageType.STATUS,
+    robot_id: "robot-01",
+    timestamp: new Date().toISOString(),
+    payload: {},
+  };
+}
+
 // =============================================================================
-// formatOdomData — オドメトリデータを表示用に変換
+// フォーマット関数
 // =============================================================================
-//
-// 【Step 3 のセンサーデータ形式】
-// MockAdapter は adapter.SensorData を送信し、server の sensorDataToMessage で
-// protocol.Message に変換される。Payload は map[string]any（= JS のオブジェクト）。
-//
-// /odom トピック:
-//   { pos_x, pos_y, theta, linear_x, angular_z, speed }
-//
-// /battery トピック:
-//   { percentage, voltage, temperature }
 export function formatOdomData(data) {
   return {
     posX: `${(data.pos_x || 0).toFixed(2)} m`,

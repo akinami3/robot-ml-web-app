@@ -1,27 +1,28 @@
 // =============================================================================
-// Step 3: cmd/gateway/main.go — エントリーポイント
+// Step 5: cmd/gateway/main.go — 安全パイプライン統合版
 // =============================================================================
 //
-// 【このファイルの概要】
-// Go プロジェクトの慣例的なディレクトリ構造:
+// 【Step 4 からの変更点】
+// 1. Safety コンポーネントの初期化と配線
+// 2. Hub の作成
+// 3. Server への依存性注入が増加（安全コンポーネント）
+// 4. ウォッチドッグのタイムアウト設定
 //
-//   cmd/gateway/main.go   ← エントリーポイント（配線だけ）
-//   internal/adapter/     ← ロボットアダプター（ビジネスロジック）
-//   internal/server/      ← WebSocket サーバー（通信層）
-//   internal/protocol/    ← メッセージ定義（データ層）
+// 【配線（Wiring）の全体像】
 //
-// 【cmd/ の役割】
-// main パッケージを置く場所。
-// ここでは「配線（wiring）」のみを行い、ロジックは internal/ に任せる。
+//   main.go が各コンポーネントを作成し、依存関係を接続する。
+//   コンポーネント自身は「自分に何が渡されるか」を知らない。
+//   → 疎結合（Loose Coupling）
 //
-// 【internal/ の役割】
-// Go の特別なディレクトリ名。
-// internal/ 配下のパッケージは、同じモジュール内からしかインポートできない。
-// 外部のプロジェクトが勝手に使うことを防ぐ。
-//
-// 【Step 2 の main.go との違い】
-// Step 2: main.go に WebSocket 処理がすべて入っていた（約300行）
-// Step 3: main.go は約60行。配線だけ。処理は各パッケージに分散。
+//               ┌─ EStopManager
+//               │
+//   Registry ─ MockAdapter ─┐
+//                            │
+//   Hub ──────────────────── Server
+//                            │
+//               ├─ VelocityLimiter ─── EStopManager（参照）
+//               ├─ TimeoutWatchdog ─── EStopManager（参照）
+//               └─ OperationLock
 //
 // =============================================================================
 package main
@@ -29,67 +30,94 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
-	// 各パッケージをインポート
 	"github.com/robot-ai-webapp/gateway/internal/adapter"
 	"github.com/robot-ai-webapp/gateway/internal/adapter/mock"
+	"github.com/robot-ai-webapp/gateway/internal/safety"
 	"github.com/robot-ai-webapp/gateway/internal/server"
 )
 
-// =============================================================================
-// main — プログラムのエントリーポイント
-// =============================================================================
-//
-// 【処理の流れ】
-// 1. アダプターレジストリを作成
-// 2. MockAdapter ファクトリを登録
-// 3. MockAdapter インスタンスを生成
-// 4. MockAdapter をロボットに「接続」
-// 5. WebSocket サーバーを起動
-//
-// 【依存性の流れ（上から下へ）】
-// main.go → server.Server → adapter.RobotAdapter (= mock.MockAdapter)
-//
-// main.go は「全体の組み立て役」。
-// 各パーツ（adapter, server）は互いを直接知らない。
-// main.go がそれらを繋ぎ合わせる。
 func main() {
-	// --- 1. レジストリを作成 ---
-	// レジストリはアダプターのファクトリ関数を管理する。
-	// 将来複数のアダプター（mock, ros, gazebo 等）を切り替え可能にする。
+	// =================================================================
+	// 1. アダプターの準備（Step 3 と同じ）
+	// =================================================================
 	registry := adapter.NewRegistry()
-
-	// --- 2. MockAdapter のファクトリを登録 ---
-	// "mock" という名前で MockAdapter のファクトリ関数を登録。
-	// ファクトリ関数: 呼ぶたびに新しいアダプターを作って返す関数。
 	registry.RegisterFactory("mock", mock.Factory)
-
 	log.Println("📋 登録済みアダプター:", registry.ListFactories())
 
-	// --- 3. MockAdapter インスタンスを生成 ---
-	// registry.CreateAdapter("mock") は:
-	//   1. "mock" に対応するファクトリ関数（mock.Factory）を見つける
-	//   2. mock.Factory() を呼んで MockAdapter を生成
-	//   3. active マップに登録
-	//   4. adapter.RobotAdapter インターフェースとして返す
 	robotAdapter, err := registry.CreateAdapter("robot-01", "mock")
 	if err != nil {
 		log.Fatalf("❌ アダプター作成失敗: %v", err)
 	}
 
-	// --- 4. モックロボットに接続 ---
-	// Connect を呼ぶと、MockAdapter 内部でセンサーデータ生成が開始される。
-	// config は nil（MockAdapter は設定不要）
 	if err := robotAdapter.Connect(context.Background(), nil); err != nil {
 		log.Fatalf("❌ ロボット接続失敗: %v", err)
 	}
 
-	// --- 5. WebSocket サーバーを作成して起動 ---
-	// robotAdapter を注入（Dependency Injection）
-	srv := server.NewServer(robotAdapter, ":8080")
+	// =================================================================
+	// 2. 安全コンポーネントの初期化（Step 5 で新規追加）
+	// =================================================================
+	//
+	// 【初期化の順序が重要】
+	// EStopManager を最初に作る。
+	// VelocityLimiter と TimeoutWatchdog が EStopManager を参照するため。
+	// 依存関係の順に初期化する。
 
-	// サーバー起動（ブロッキング）
-	// ListenAndServe が返るのはエラー時のみ
+	// --- 2a. E-Stop マネージャー ---
+	estop := safety.NewEStopManager()
+
+	// --- 2b. 速度リミッター ---
+	// maxLinear: 1.0 m/s, maxAngular: 1.0 rad/s
+	// MockAdapter の能力に合わせた値。
+	limiter := safety.NewVelocityLimiter(1.0, 1.0, estop)
+
+	// --- 2c. タイムアウトウォッチドッグ ---
+	// 30秒間コマンドが来なければタイムアウト
+	// 開発中は長めに設定（本番では 5-10 秒が適切）
+	watchdog := safety.NewTimeoutWatchdog(30*time.Second, estop)
+
+	// --- 2d. 操作排他ロック ---
+	opLock := safety.NewOperationLock()
+
+	// --- 2e. E-Stop リスナーの設定 ---
+	// E-Stop が発動されたら、操作ロックを強制解放する
+	estop.OnStateChange(func(active bool) {
+		if active {
+			opLock.ForceUnlock("E-Stop 発動による強制解放")
+			log.Println("🛑 E-Stop 発動: 操作ロックを強制解放しました")
+		}
+	})
+
+	log.Println("🛡️ 安全コンポーネント初期化完了")
+	log.Printf("   速度制限: linear=1.0 m/s, angular=1.0 rad/s")
+	log.Printf("   ウォッチドッグ: タイムアウト=30s")
+
+	// =================================================================
+	// 3. Hub の作成（Step 5 で新規追加）
+	// =================================================================
+	hub := server.NewHub()
+
+	// =================================================================
+	// 4. サーバーの起動
+	// =================================================================
+	//
+	// 【依存性注入の数が増えた】
+	// Step 4: NewServer(adapter, port)
+	// Step 5: NewServer(adapter, hub, estop, limiter, watchdog, opLock, port)
+	//
+	// 引数が多いのは「責務が増えた」ため。
+	// 将来的には Config 構造体や Builder パターンを使って整理する。
+	srv := server.NewServer(
+		robotAdapter,
+		hub,
+		estop,
+		limiter,
+		watchdog,
+		opLock,
+		":8080",
+	)
+
 	if err := srv.Start(context.Background()); err != nil {
 		log.Fatalf("❌ サーバーエラー: %v", err)
 	}
