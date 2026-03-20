@@ -1,103 +1,98 @@
 <!DOCTYPE html>
 <!--
   =============================================================================
-  Step 8: Authentication — JWT + bcrypt + RBAC
+  Step 9: React Migration — React 18 + TypeScript + Vite
   =============================================================================
 
-  【Step 7 からの変更点】
-  1. ログイン / サインアップページの追加
-  2. JWT トークンベース認証（localStorage 保存）
-  3. ナビゲーションに認証状態を表示
-  4. ロールベースアクセス制御（Admin / Operator / Viewer）
-  5. API リクエストに Authorization ヘッダーを自動付与
+  【Step 8 からの変更点】
+  Step 8 では Vanilla JavaScript + ハッシュルーターでフロントエンドを構築しました。
+  Step 9 では、以下の技術に移行します:
 
-  【認証の仕組み（全体像）】
-  1. ユーザーがログイン → サーバーが JWT を発行
-  2. フロントエンドが JWT を localStorage に保存
-  3. API リクエスト時に Authorization: Bearer <JWT> ヘッダーを付与
-  4. サーバーが JWT を検証 → ユーザーを識別
+  1. React 18        — コンポーネントベースの UI ライブラリ
+  2. TypeScript       — 型安全な JavaScript（開発時のエラー検出）
+  3. Vite             — 高速ビルドツール + HMR（Hot Module Replacement）
+  4. React Router v6  — SPA のページ遷移管理
+  5. Zustand          — 軽量な状態管理ライブラリ
+  6. TanStack Query   — サーバーデータ取得・キャッシュ管理
+  7. Axios            — HTTP クライアント + インターセプター（認証トークン自動付与）
+  8. Tailwind CSS     — ユーティリティファースト CSS フレームワーク
 
-  【ページ構成】
-    #/login      → ログインページ（公開）
-    #/signup     → サインアップページ（公開）
-    #/           → ロボット一覧（要認証）
-    #/robots     → ロボット一覧（要認証）
-    #/robots/new → ロボット登録フォーム（要認証）
-    #/control    → リアルタイム制御（要認証）
+  【Vite のエントリーポイント】
+  この index.html が Vite の「エントリーポイント」です。
+  従来の Webpack と異なり、Vite は index.html をルートとして扱います。
+  <script type="module" src="/src/main.tsx"> が React アプリの起動点です。
+
+  【SPA（シングルページアプリケーション）とは？】
+  ブラウザが最初にこの HTML を1回だけ読み込み、以降のページ遷移は
+  JavaScript（React Router）が処理します。ページ全体のリロードは不要です。
+  Step 8 のハッシュルーター（#/login）と違い、通常の URL（/login）を使います。
 
   【ファイル構成の変化】
-  Step 7 → Step 8:
-    ├── js/
-    │   ├── api.js              ← ★ 認証ヘッダー + リフレッシュトークン
-    │   ├── app.js              ← ★ ルートガード + 認証 UI
-    │   ├── pages/
-    │   │   ├── login.js        ← ★ 新規: ログインページ
-    │   │   ├── signup.js       ← ★ 新規: サインアップページ
-    │   │   ├── robot-list.js   ← 変更なし
-    │   │   ├── robot-form.js   ← 変更なし
-    │   │   └── control.js      ← 変更なし
-    │   └── ...（その他は変更なし）
-    └── css/
-        └── style.css           ← ★ 認証ページのスタイル追加
+  Step 8 → Step 9:
+    frontend/
+    ├── index.html              ← ★ Vite エントリーポイント（このファイル）
+    ├── package.json            ← ★ React + TypeScript + 各種ライブラリ
+    ├── vite.config.ts          ← ★ Vite 設定 + プロキシ + @ エイリアス
+    ├── tsconfig.json           ← ★ TypeScript 設定（strict mode）
+    ├── tailwind.config.js      ← ★ Tailwind CSS テーマ設定
+    ├── postcss.config.js       ← ★ PostCSS プラグイン設定
+    ├── Dockerfile.dev          ← ★ Vite dev server 用
+    └── src/
+        ├── main.tsx            ← ★ React ルート + Provider 設定
+        ├── App.tsx             ← ★ ルーティング定義
+        ├── index.css           ← ★ Tailwind + CSS 変数（テーマ）
+        ├── types/index.ts      ← ★ 型定義
+        ├── services/api.ts     ← ★ Axios + インターセプター
+        ├── stores/authStore.ts ← ★ Zustand 認証ストア
+        ├── stores/robotStore.ts← ★ Zustand ロボットストア
+        ├── lib/utils.ts        ← ★ ユーティリティ関数
+        ├── components/
+        │   ├── layout/
+        │   │   ├── AppLayout.tsx  ← ★ Sidebar + Outlet シェル
+        │   │   └── Sidebar.tsx    ← ★ ナビゲーション
+        │   └── ui/
+        │       └── primitives.tsx ← ★ 基本UIコンポーネント
+        └── pages/
+            ├── LoginPage.tsx      ← ★ useState + authApi
+            ├── SignupPage.tsx      ← ★ バリデーション + 自動ログイン
+            ├── DashboardPage.tsx   ← ★ useQuery + ロボット一覧
+            └── SettingsPage.tsx    ← ★ localStorage + テーマ切替
 
   =============================================================================
 -->
 <html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Step 8: Authentication 🔐</title>
-  <link rel="stylesheet" href="./css/style.css">
-</head>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Robot AI — Step 9</title>
+    <!--
+      【Vite の CSS 読み込み】
+      Tailwind CSS は src/index.css に定義されており、
+      main.tsx から import されます。Vite が自動的に <style> タグを挿入するため、
+      ここに <link> タグは不要です。
+    -->
+  </head>
+  <body>
+    <!--
+      【React のマウントポイント】
+      id="root" の <div> が React アプリケーションのマウント先です。
+      React は ReactDOM.createRoot(document.getElementById("root")) で
+      この要素を取得し、内部に仮想 DOM を描画します。
 
-<body>
-  <!-- ================================================================
-       ナビゲーションバー（Step 8 認証対応版）
-       ================================================================
-       認証状態に応じて表示を切り替える:
-       - 未認証: 「ログイン」ボタンのみ表示
-       - 認証済: ユーザー名 + ロールバッジ + ログアウトボタン
-       ================================================================ -->
-  <nav class="navbar">
-    <div class="navbar-brand">
-      <span class="brand-icon">🤖</span>
-      <span class="brand-name">Robot AI Web App</span>
-      <span class="brand-step">Step 8</span>
-    </div>
+      Step 8 では <div id="page-content"> にページを直接書き込んでいましたが、
+      React では「仮想 DOM（Virtual DOM）」を使って効率的に UI を更新します。
+    -->
+    <div id="root"></div>
 
-    <div class="navbar-links">
-      <!-- nav-link-auth: 認証済みの場合のみ表示 -->
-      <a href="#/" data-route="/" class="nav-link nav-link-auth">📋 ロボット一覧</a>
-      <a href="#/robots/new" data-route="/robots/new" class="nav-link nav-link-auth">＋ 新規登録</a>
-      <a href="#/control" data-route="/control" class="nav-link nav-link-auth">🎮 制御</a>
-    </div>
+    <!--
+      【Vite のモジュール読み込み】
+      type="module" を指定すると、ブラウザのネイティブ ES Modules として読み込まれます。
+      Vite の開発サーバーは、このファイルを起点に依存関係を解析し、
+      必要なモジュールをオンデマンドで変換・提供します（バンドルしないので高速）。
 
-    <div class="navbar-info">
-      <!-- 認証状態を表示するエリア（app.js から動的に書き換え） -->
-      <div id="authArea"></div>
-
-      <span class="api-status" id="apiStatus">
-        <span class="api-dot"></span> API
-      </span>
-    </div>
-  </nav>
-
-  <!-- ================================================================
-       ページコンテンツ領域
-       ================================================================ -->
-  <main class="main-content">
-    <div id="page-content">
-      <div class="loading">読み込み中...</div>
-    </div>
-  </main>
-
-  <!-- ================================================================
-       フッター
-       ================================================================ -->
-  <footer class="footer">
-    <span>Step 8: Authentication — JWT + bcrypt + Role-Based Access Control</span>
-  </footer>
-
-  <script type="module" src="./js/app.js"></script>
-</body>
+      /src/main.tsx — React アプリのエントリーポイント
+      ここから App.tsx → 各ページコンポーネント へと読み込みが連鎖します。
+    -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
