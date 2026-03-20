@@ -1,62 +1,103 @@
-# Step 4: センサー可視化ダッシュボード 📡
+# Step 9: React + TypeScript 移行 ⚛️
+
+> **ブランチ**: `step/09-react-migration`
+> **前のステップ**: `step/08-authentication`
+> **次のステップ**: `step/10-realtime-dashboard`
+
+---
+
+## このステップで学ぶこと
+
+1. **React の基礎** — JSX、コンポーネント、仮想 DOM
+2. **TypeScript** — 型安全な JavaScript 開発
+3. **Vite** — 高速な開発サーバーとビルドツール
+4. **React Router v6** — クライアントサイドルーティング
+5. **Zustand** — 軽量な状態管理ライブラリ
+6. **Tailwind CSS** — ユーティリティファーストの CSS フレームワーク
+
+---
 
 ## 概要
 
-4種類のセンサーデータをリアルタイムに Canvas / SVG で可視化するステップ。
-MockAdapter を拡張してLiDAR・IMU データを生成し、ブラウザ上で描画する。
+Step 1〜8 で作ってきた Vanilla JS / CSS フロントエンドを
+**React 18 + TypeScript + Vite** で全面的に書き直すステップ。
+16 個の Vanilla JS ファイルを削除し、React コンポーネントベースの
+モダンなフロントエンドアーキテクチャに移行する。
+
+---
 
 ## 学習ポイント
 
-### Canvas 2D API
-- `<canvas>` 要素と `getContext('2d')` による描画
-- 座標変換（translate, rotate）
-- requestAnimationFrame ではなく WebSocket メッセージ駆動の更新
+### Vanilla JS → React の対応表
 
-### SVG（Scalable Vector Graphics）
-- `<circle>` と `stroke-dasharray` / `stroke-dashoffset` による円形ゲージ
-- Canvas との使い分け: UIパーツ → SVG、高頻度更新 → Canvas
+| Vanilla JS | React |
+|---|---|
+| `document.getElementById()` | `useRef()` |
+| `addEventListener('click', ...)` | `onClick={...}` |
+| `element.innerHTML = ...` | JSX による宣言的 UI |
+| グローバル変数 | `useState()` / Zustand ストア |
+| `fetch()` 直接呼び出し | TanStack Query / Axios |
+| URL ハッシュルーティング | React Router v6 |
+| `<style>` / CSS ファイル | Tailwind CSS クラス |
+| DOM 直接操作 | 仮想 DOM による差分更新 |
 
-### ES Classes とプライベートフィールド
-- `class` 構文による OOP
-- `#field` でプライベートフィールドを宣言（ES2022）
-- コンストラクタでの依存性注入パターン
+### React の主要コンセプト
+- **コンポーネント**: UI を再利用可能な部品に分割
+- **JSX**: HTML ライクな構文で UI を記述
+- **Hooks**: `useState`, `useEffect`, `useCallback`, `useRef`
+- **宣言的 UI**: 「この状態ならこの見た目」を記述（手続き的に DOM を操作しない）
 
-### センサーデータの基礎
-| センサー | 周波数 | データ内容 |
-|----------|--------|------------|
-| LiDAR | 10 Hz | 360点の距離データ（極座標） |
-| IMU | 50 Hz | 加速度 3軸 + ジャイロ 3軸 |
-| Odometry | 10 Hz | 位置 (x,y)、向き θ、速度 |
-| Battery | 1 Hz | 残量 %、電圧、温度 |
+### 状態管理
+- **Zustand**: グローバルな認証状態（`authStore`）、ロボット状態（`robotStore`）
+- **TanStack Query**: サーバーデータの取得・キャッシュ・再取得を自動管理
+- **useState**: コンポーネントローカルの状態
 
-### 外部 CSS
-- `<style>` タグからの分離
-- CSSファイルのキャッシュメリット
-- BEM 風のクラス命名
+### 開発ツール
+- **Vite**: HMR（Hot Module Replacement）で保存即反映
+- **TypeScript**: 型エラーをビルド時に検出
+- **ESLint / Prettier**: コード品質の自動チェック
+
+---
 
 ## ファイル構成
 
 ```
-gateway/
-  internal/
-    adapter/mock/
-      mock_adapter.go  ← LiDAR + IMU 生成を追加
-
-frontend/
-  index.html           ← 外部CSS参照 + ダッシュボードレイアウト
-  css/
-    style.css          ← 外部CSS（auto-fill グリッド）
-  js/
-    protocol-base.js   ← Step 2 から継続
-    protocol.js        ← Step 3 から継続
-    websocket-client.js ← WebSocket をクラスで管理
-    app.js             ← センサーデータのルーティング
-    sensors/
-      lidar-viewer.js  ← LiDAR 極座標プロット
-      imu-chart.js     ← IMU 6軸リアルタイムチャート
-      battery-gauge.js ← SVG 円形バッテリーゲージ
-      odometry.js      ← 軌跡付きミニマップ
+frontend/                        ← 全面書き換え
+  src/
+    main.tsx                     ← エントリーポイント（Provider 構成）
+    App.tsx                      ← React Router ルーティング
+    index.css                    ← Tailwind CSS インポート
+    components/
+      layout/
+        AppLayout.tsx            ← サイドバー + メインコンテンツ
+        Sidebar.tsx              ← ナビゲーションサイドバー
+      ui/
+        Button.tsx               ← ボタンコンポーネント
+        Card.tsx                 ← カード UI
+        Input.tsx                ← 入力フィールド
+    pages/
+      LoginPage.tsx              ← ログイン画面（React 版）
+      SignupPage.tsx             ← サインアップ画面
+      DashboardPage.tsx          ← ロボット一覧ダッシュボード
+      SettingsPage.tsx           ← テーマ切替・安全設定
+    services/
+      api.ts                     ← Axios + インターセプター
+    stores/
+      authStore.ts               ← Zustand 認証ストア
+      robotStore.ts              ← Zustand ロボット状態ストア
+    types/
+      index.ts                   ← TypeScript 型定義
+    lib/
+      utils.ts                   ← ユーティリティ関数
+  package.json                   ← React, Vite, Tailwind 等
+  vite.config.ts                 ← Vite 設定（プロキシ）
+  tsconfig.json                  ← TypeScript 設定
+  tailwind.config.js             ← Tailwind 設定
+  postcss.config.js              ← PostCSS 設定
+  index.html                     ← SPA エントリ（div#root）
 ```
+
+---
 
 ## 起動方法
 
@@ -64,31 +105,57 @@ frontend/
 docker compose up --build
 ```
 
-ブラウザで http://localhost:3000 を開き、「WS接続」→「ロボット接続」。
+| サービス | URL | 説明 |
+|----------|-----|------|
+| frontend | http://localhost:3000 | Vite 開発サーバー（HMR） |
+| backend | http://localhost:8000 | FastAPI |
+| gateway | ws://localhost:8080 | WebSocket |
+| postgres | 5432 | PostgreSQL |
 
-## MockAdapter の LiDAR シミュレーション
+### 開発時の便利機能
 
-MockAdapter は仮想的な部屋（10m × 8m）を定義し、ロボットの位置から
-各角度方向にレイキャスト（光線追跡）を行って壁までの距離を計算する。
+- ファイルを保存すると **即座にブラウザに反映**（HMR）
+- TypeScript の型エラーはエディタ上でリアルタイムに表示
+- React DevTools（ブラウザ拡張）でコンポーネントツリーを確認
 
+---
+
+## Step 8 からの主な変更
+
+| カテゴリ | 変更内容 |
+|----------|----------|
+| フレームワーク | Vanilla JS → React 18 + TypeScript |
+| ビルドツール | Nginx 静的配信 → Vite 開発サーバー |
+| ルーティング | ハッシュルーター → React Router v6 |
+| 状態管理 | グローバル変数 → Zustand |
+| スタイリング | CSS ファイル → Tailwind CSS |
+| API 通信 | fetch() → Axios + TanStack Query |
+| ファイル数 | 40 files changed, +4,562 / -3,975 |
+
+---
+
+## 💡 このステップのポイント
+
+Step 9 は **最もファイル変更が大きいステップ** です。
+Vanilla JS から React への移行は「機能追加」ではなく「同じ機能の再実装」。
+`git diff step/08-authentication..step/09-react-migration -- frontend/` で
+変更内容を確認してみましょう。
+
+---
+
+## 🏋️ チャレンジ課題
+
+1. **新しいページを追加**: `AboutPage.tsx` を作り、React Router にルートを追加
+2. **コンポーネント分割**: DashboardPage のロボットカードを独立コンポーネントに分離
+3. **Zustand ストア**: テーマ設定（ダーク/ライト）を永続化するストアを作成
+4. **React DevTools**: ブラウザ拡張をインストールして、コンポーネントの再レンダリングを観察
+
+---
+
+## 次のステップへ
+
+Step 10 では WebSocket をカスタムフックで React に統合し、**リアルタイムダッシュボード** を構築します:
+
+```bash
+git checkout step/10-realtime-dashboard
 ```
-       Wall (y=4)
-  ┌─────────────────────┐
-  │                     │
-  │     Robot (0,0) →   │    360点のスキャン
-  │                     │
-  └─────────────────────┘
-       Wall (y=-4)
-```
-
-## Step 3 からの変更差分
-
-| 変更 | 詳細 |
-|------|------|
-| MockAdapter 拡張 | LiDAR (10Hz) + IMU (50Hz) センサー追加 |
-| 外部 CSS | `<style>` → `css/style.css` に分離 |
-| WebSocketClient | 生 WebSocket → クラスで抽象化 |
-| LidarViewer | Canvas: 極座標 → 直交座標変換で点群描画 |
-| ImuChart | Canvas: リングバッファ式 6 軸ラインチャート |
-| BatteryGauge | CSS バー → SVG 円形ゲージ |
-| OdometryViewer | 数値のみ → Canvas ミニマップ + 軌跡描画 |
