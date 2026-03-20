@@ -1,62 +1,107 @@
-# Step 4: センサー可視化ダッシュボード 📡
+# Step 8: 認証・認可 🔐
+
+> **ブランチ**: `step/08-authentication`
+> **前のステップ**: `step/07-database`
+> **次のステップ**: `step/09-react-migration`
+
+---
+
+## このステップで学ぶこと
+
+1. **JWT（JSON Web Token）** — トークンの構造（Header.Payload.Signature）、HS256 署名
+2. **パスワードハッシュ** — bcrypt によるソルト付きハッシュ化
+3. **RBAC** — ロールベースアクセス制御（Admin / Operator / Viewer）
+4. **トークンリフレッシュ** — Access Token（短寿命）+ Refresh Token（長寿命）
+5. **FastAPI DI チェーン** — `Depends()` を連鎖させた認証・認可の実装
+
+---
 
 ## 概要
 
-4種類のセンサーデータをリアルタイムに Canvas / SVG で可視化するステップ。
-MockAdapter を拡張してLiDAR・IMU データを生成し、ブラウザ上で描画する。
+ユーザー認証（ログイン・サインアップ）と、ロール（権限）に基づくアクセス制御を
+バックエンドとフロントエンドの両方に追加するステップ。
+JWT トークンによるステートレス認証と、bcrypt によるパスワードの安全な保存を実装する。
+初期管理者ユーザー（admin / admin123）が自動作成される。
+
+---
 
 ## 学習ポイント
 
-### Canvas 2D API
-- `<canvas>` 要素と `getContext('2d')` による描画
-- 座標変換（translate, rotate）
-- requestAnimationFrame ではなく WebSocket メッセージ駆動の更新
+### JWT 認証フロー
 
-### SVG（Scalable Vector Graphics）
-- `<circle>` と `stroke-dasharray` / `stroke-dashoffset` による円形ゲージ
-- Canvas との使い分け: UIパーツ → SVG、高頻度更新 → Canvas
+```
+1. ログイン
+   ブラウザ ── POST /auth/login ──► バックエンド
+               { email, password }
+                                    パスワード検証（bcrypt）
+   ブラウザ ◄── 200 ──────────────── { access_token, refresh_token }
 
-### ES Classes とプライベートフィールド
-- `class` 構文による OOP
-- `#field` でプライベートフィールドを宣言（ES2022）
-- コンストラクタでの依存性注入パターン
+2. API リクエスト
+   ブラウザ ── GET /api/v1/robots ─► バックエンド
+               Authorization: Bearer <access_token>
+                                    JWT 検証 → ユーザー取得
+   ブラウザ ◄── 200 ──────────────── [robots...]
 
-### センサーデータの基礎
-| センサー | 周波数 | データ内容 |
-|----------|--------|------------|
-| LiDAR | 10 Hz | 360点の距離データ（極座標） |
-| IMU | 50 Hz | 加速度 3軸 + ジャイロ 3軸 |
-| Odometry | 10 Hz | 位置 (x,y)、向き θ、速度 |
-| Battery | 1 Hz | 残量 %、電圧、温度 |
+3. トークン更新
+   ブラウザ ── POST /auth/refresh ─► バックエンド
+               { refresh_token }
+   ブラウザ ◄── 200 ──────────────── { access_token（新しい） }
+```
 
-### 外部 CSS
-- `<style>` タグからの分離
-- CSSファイルのキャッシュメリット
-- BEM 風のクラス命名
+### RBAC（ロールベースアクセス制御）
+
+| ロール | ロボット一覧 | ロボット登録 | ロボット削除 | ユーザー管理 |
+|--------|:----------:|:----------:|:----------:|:----------:|
+| Viewer | ✅ | ❌ | ❌ | ❌ |
+| Operator | ✅ | ✅ | ❌ | ❌ |
+| Admin | ✅ | ✅ | ✅ | ✅ |
+
+### セキュリティの仕組み
+- **bcrypt**: パスワードをハッシュ化して保存（平文を保存しない）
+- **JWT 署名**: トークンの改ざんを検出（SECRET_KEY で署名）
+- **短寿命 Access Token**: 30 分で失効（漏洩リスク低減）
+- **サイレントリフレッシュ**: 401 応答時に自動で Refresh Token を使って更新
+
+---
 
 ## ファイル構成
 
 ```
-gateway/
-  internal/
-    adapter/mock/
-      mock_adapter.go  ← LiDAR + IMU 生成を追加
+backend/
+  app/
+    core/
+      security.py                          ← 🆕 JWT 生成・検証、パスワードハッシュ
+    domain/
+      entities/
+        user.py                            ← UserRole 列挙型追加
+      repositories/
+        user_repo.py                       ← 🆕 UserRepository インターフェース
+    infrastructure/
+      database/
+        models.py                          ← UserModel 追加
+        repositories/
+          user_repo.py                     ← 🆕 SQLAlchemy 実装
+    api/v1/
+      auth.py                              ← 🆕 ログイン・登録・リフレッシュ
+      users.py                             ← 🆕 ユーザー管理（Admin のみ）
+      dependencies.py                      ← 認証 DI チェーン追加
+      robots.py                            ← 認証保護追加
+  alembic/versions/                        ← 🆕 users テーブルマイグレーション
+
+keys/                                      ← 🆕 シークレットキー管理
 
 frontend/
-  index.html           ← 外部CSS参照 + ダッシュボードレイアウト
-  css/
-    style.css          ← 外部CSS（auto-fill グリッド）
   js/
-    protocol-base.js   ← Step 2 から継続
-    protocol.js        ← Step 3 から継続
-    websocket-client.js ← WebSocket をクラスで管理
-    app.js             ← センサーデータのルーティング
-    sensors/
-      lidar-viewer.js  ← LiDAR 極座標プロット
-      imu-chart.js     ← IMU 6軸リアルタイムチャート
-      battery-gauge.js ← SVG 円形バッテリーゲージ
-      odometry.js      ← 軌跡付きミニマップ
+    api.js                                 ← Authorization ヘッダー自動付与
+    app.js                                 ← ルートガード + ログアウト
+    pages/
+      login.js                             ← 🆕 ログインページ
+      signup.js                            ← 🆕 サインアップページ
+
+docker-compose.yml                         ← SECRET_KEY 環境変数追加
 ```
+
+---
 
 ## 起動方法
 
@@ -64,31 +109,50 @@ frontend/
 docker compose up --build
 ```
 
-ブラウザで http://localhost:3000 を開き、「WS接続」→「ロボット接続」。
+### 初期管理者でログイン
 
-## MockAdapter の LiDAR シミュレーション
+| フィールド | 値 |
+|-----------|-----|
+| Email | admin@example.com |
+| Password | admin123 |
 
-MockAdapter は仮想的な部屋（10m × 8m）を定義し、ロボットの位置から
-各角度方向にレイキャスト（光線追跡）を行って壁までの距離を計算する。
+### 試してみる
 
+1. http://localhost:3000 → ログインページにリダイレクト
+2. 初期管理者でログイン → ダッシュボードが表示される
+3. 「サインアップ」で新しいユーザーを作成（Viewer ロール）
+4. Viewer でログイン → ロボット登録ボタンが非表示になることを確認
+5. DevTools → Application → Local Storage でトークンを確認
+
+---
+
+## Step 7 からの主な変更
+
+| カテゴリ | 変更内容 |
+|----------|----------|
+| 認証 | JWT トークン（Access + Refresh）方式 |
+| パスワード | bcrypt ハッシュ化 |
+| 認可 | RBAC（Admin / Operator / Viewer） |
+| API 保護 | 全エンドポイントに認証必須化 |
+| フロント | ログイン/サインアップページ、ルートガード |
+| DI | `require_role()` 高階関数による権限チェック |
+| ファイル数 | 22 files changed, +2,198 / -737 |
+
+---
+
+## 🏋️ チャレンジ課題
+
+1. **トークンの中身を見よう**: https://jwt.io/ で Access Token をデコードして構造を確認
+2. **権限を試そう**: Viewer で POST /api/v1/robots を呼ぶと 403 が返ることを確認
+3. **トークンの有効期限**: Access Token の期限を 1 分に変更して、自動リフレッシュを観察
+4. **パスワード変更 API**: PUT /auth/password エンドポイントを追加してみよう
+
+---
+
+## 次のステップへ
+
+Step 9 では Vanilla JS フロントエンドを **React + TypeScript** に全面移行します:
+
+```bash
+git checkout step/09-react-migration
 ```
-       Wall (y=4)
-  ┌─────────────────────┐
-  │                     │
-  │     Robot (0,0) →   │    360点のスキャン
-  │                     │
-  └─────────────────────┘
-       Wall (y=-4)
-```
-
-## Step 3 からの変更差分
-
-| 変更 | 詳細 |
-|------|------|
-| MockAdapter 拡張 | LiDAR (10Hz) + IMU (50Hz) センサー追加 |
-| 外部 CSS | `<style>` → `css/style.css` に分離 |
-| WebSocketClient | 生 WebSocket → クラスで抽象化 |
-| LidarViewer | Canvas: 極座標 → 直交座標変換で点群描画 |
-| ImuChart | Canvas: リングバッファ式 6 軸ラインチャート |
-| BatteryGauge | CSS バー → SVG 円形ゲージ |
-| OdometryViewer | 数値のみ → Canvas ミニマップ + 軌跡描画 |
