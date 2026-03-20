@@ -240,8 +240,90 @@ export interface NavigationGoal {
 
 // ─── 今後のステップで追加される型 ─────────────────────────────────────
 //
-// Step 10 以降で以下の型定義が追加されます:
-//   - Dataset（データセット）          → Step 11: Data Management
-//   - RecordingSession（記録セッション）→ Step 11: Data Management
+// Step 12 以降で以下の型定義が追加されます:
 //   - RAGDocument / RAGQueryResult     → Step 12: RAG Chat
-//   - AuditLog（監査ログ）             → Step 12: RAG Chat
+//   - AuditLog（監査ログ）             → Step 13: Production
+
+// ─── Recording Session（記録セッション）関連の型（Step 11 新規） ──────────
+
+/**
+ * RecordingStatus - 記録セッションの状態を定義する型
+ *
+ * 記録セッションのライフサイクル：
+ * recording（記録中） → stopped（停止済み） → processing（データ処理中）
+ */
+export type RecordingStatus = "recording" | "stopped" | "processing" | "error";
+
+/**
+ * RecordingConfig - 記録設定を表すインターフェース
+ *
+ * 「どのセンサーを」「どのくらいの頻度で」記録するかを定義する設定。
+ * 記録開始時にユーザーが指定する。
+ */
+export interface RecordingConfig {
+  sensor_types: string[];     // 記録対象のセンサー種類（例: ["lidar", "imu"]）
+  max_frequency_hz: number;   // 最大記録周波数（Hz）— データ量の制御に使用
+  description?: string;       // 記録の説明（省略可能）
+}
+
+/**
+ * RecordingSession - 記録セッションを表すインターフェース
+ *
+ * 💡 セッション（Session）とは？
+ * - ユーザーが「記録開始」をクリックしてから「停止」をクリックするまでの期間
+ * - 1つのセッションに複数のセンサーデータが紐づく
+ * - 停止後、データセットに変換して機械学習に利用できる
+ */
+export interface RecordingSession {
+  id: string;                          // セッションの一意なID
+  robot_id: string;                    // 記録対象のロボットID
+  user_id: string;                     // 記録を開始したユーザーのID
+  config: RecordingConfig;             // 記録設定
+  is_active: boolean;                  // 現在記録中かどうか
+  record_count: number;                // 記録されたデータ件数
+  size_bytes: number;                  // データサイズ（バイト）
+  started_at: string;                  // 記録開始日時
+  stopped_at: string | null;           // 記録停止日時（記録中は null）
+  dataset_id: string | null;           // 変換先データセットID
+}
+
+// ─── Dataset（データセット）関連の型（Step 11 新規） ──────────────────
+
+/**
+ * DatasetStatus - データセットの状態を定義する型
+ *
+ * データセットのライフサイクル：
+ * creating（作成中） → ready（準備完了） → exporting（エクスポート中） → archived（保管済み）
+ */
+export type DatasetStatus =
+  | "creating"   // 作成中: データを集めている最中
+  | "ready"      // 準備完了: データ収集完了、利用可能
+  | "exporting"  // エクスポート中: CSV等に変換中
+  | "archived"   // アーカイブ済み: 保管状態
+  | "error";     // エラー: 処理中に問題発生
+
+/**
+ * Dataset - データセットを表すインターフェース
+ *
+ * 💡 データセットとは？
+ * - 機械学習のトレーニングに使うデータの集まり
+ * - 記録セッションのデータをまとめて1つのデータセットにする
+ * - CSV/JSON形式でエクスポートして、Pythonの scikit-learn や PyTorch で使える
+ */
+export interface Dataset {
+  id: string;                   // データセットの一意なID
+  name: string;                 // データセット名（例: "走行データ 2024-01-15"）
+  description: string;          // 説明文
+  owner_id: string;             // 所有者のユーザーID
+  status: DatasetStatus;        // 現在の状態
+  sensor_types: string[];       // 含まれるセンサーの種類
+  robot_ids: string[];          // データ元のロボットID群
+  start_time: string | null;    // データの開始時刻
+  end_time: string | null;      // データの終了時刻
+  record_count: number;         // レコード数
+  size_bytes: number;           // データサイズ（バイト）
+  tags: string[];               // タグ（検索用ラベル）
+  metadata: Record<string, unknown>;  // 追加メタデータ
+  created_at: string;           // 作成日時
+  updated_at: string;           // 更新日時
+}

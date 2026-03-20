@@ -85,7 +85,8 @@ func NewMockAdapter() *MockAdapter {
 // 【ファクトリ関数の型】
 // adapter.AdapterFactory = func() adapter.RobotAdapter
 // Factory はこのシグネチャに一致するので、レジストリに登録できる:
-//   registry.RegisterFactory("mock", mock.Factory)
+//
+//	registry.RegisterFactory("mock", mock.Factory)
 func Factory() adapter.RobotAdapter {
 	return NewMockAdapter()
 }
@@ -187,7 +188,8 @@ func (m *MockAdapter) IsConnected() bool {
 // 【map からの値取得と型アサーション】
 // cmd.Payload["linear_x"] は any 型。
 // float64 として使うには型アサーションが必要:
-//   value, ok := cmd.Payload["linear_x"].(float64)
+//
+//	value, ok := cmd.Payload["linear_x"].(float64)
 func (m *MockAdapter) SendCommand(ctx context.Context, cmd adapter.Command) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -255,19 +257,21 @@ func (m *MockAdapter) EmergencyStop(ctx context.Context) error {
 //
 // 【この関数の構造: for + select パターン】
 // Step 2 の writePump と同じパターン:
-//   for {
-//       select {
-//       case <-ctx.Done(): return   // キャンセルされたら終了
-//       case <-ticker.C:            // 定期的にデータ生成
-//       }
-//   }
+//
+//	for {
+//	    select {
+//	    case <-ctx.Done(): return   // キャンセルされたら終了
+//	    case <-ticker.C:            // 定期的にデータ生成
+//	    }
+//	}
 //
 // 【オドメトリ（Odometry）の計算】
 // ロボットの位置を「前回からの移動量」で更新する。
 // dt 秒間の移動量:
-//   dx = linearX × cos(theta) × dt
-//   dy = linearX × sin(theta) × dt
-//   dθ = angularZ × dt
+//
+//	dx = linearX × cos(theta) × dt
+//	dy = linearX × sin(theta) × dt
+//	dθ = angularZ × dt
 //
 // これは「デッドレコニング（dead reckoning）」と呼ばれる手法。
 func (m *MockAdapter) generateSensorLoop(ctx context.Context) {
@@ -275,16 +279,16 @@ func (m *MockAdapter) generateSensorLoop(ctx context.Context) {
 	// 【複数 ticker + select パターン】
 	// 複数のタイマーを1つの select で監視する。
 	// 各タイマーが独立して発火するので、センサーごとに異なる周波数を実現。
-	odomTicker := time.NewTicker(50 * time.Millisecond)    // 20Hz
+	odomTicker := time.NewTicker(50 * time.Millisecond) // 20Hz
 	defer odomTicker.Stop()
 
-	lidarTicker := time.NewTicker(100 * time.Millisecond)  // 10Hz
+	lidarTicker := time.NewTicker(100 * time.Millisecond) // 10Hz
 	defer lidarTicker.Stop()
 
-	imuTicker := time.NewTicker(20 * time.Millisecond)     // 50Hz
+	imuTicker := time.NewTicker(20 * time.Millisecond) // 50Hz
 	defer imuTicker.Stop()
 
-	batteryTicker := time.NewTicker(5 * time.Second)       // 0.2Hz
+	batteryTicker := time.NewTicker(5 * time.Second) // 0.2Hz
 	defer batteryTicker.Stop()
 
 	for {
@@ -417,8 +421,9 @@ func (m *MockAdapter) publishBattery() {
 //   - range: 障害物までの距離（メートル）
 //
 // フロントエンドでは極座標 → 直交座標変換して Canvas に描画する:
-//   x = range × cos(angle)
-//   y = range × sin(angle)
+//
+//	x = range × cos(angle)
+//	y = range × sin(angle)
 //
 // 【モックデータの生成】
 // 360度を均等に分割し、各方向の距離を「基本距離 ± ノイズ」で生成。
@@ -560,7 +565,7 @@ func (m *MockAdapter) publishIMU() {
 
 	// 加速度: 速度の変化率（簡易的に現在の速度 × 係数で近似）
 	accelX := linearX*0.5 + (rand.Float64()-0.5)*0.1
-	accelY := (rand.Float64() - 0.5) * 0.05 // 横方向は小さなノイズのみ
+	accelY := (rand.Float64() - 0.5) * 0.05    // 横方向は小さなノイズのみ
 	accelZ := 9.81 + (rand.Float64()-0.5)*0.02 // 重力 + ノイズ
 
 	// 角速度

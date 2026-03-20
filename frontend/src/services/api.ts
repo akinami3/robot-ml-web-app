@@ -237,13 +237,167 @@ export const robotApi = {
   delete: (id: string) => api.delete(`/robots/${id}`),
 };
 
+// ---------------------------------------------------------------------------
+// 【Step 11: センサーデータ API】 — Sensor Data Endpoints
+// ---------------------------------------------------------------------------
+//
+// 💡 センサーデータ API は記録されたセンサーデータの読み取りに使う
+// - WebSocket はリアルタイムデータ用（Step 10）
+// - REST API は履歴データの検索・取得用（今回追加）
+//
+// 主なクエリパラメータ:
+//   - robot_id: 特定のロボットのデータに絞り込み
+//   - sensor_type: センサー種類で絞り込み（例: "lidar", "imu"）
+//   - start/end: 時間範囲で絞り込み
+//   - limit/offset: ページネーション
+//
+import type { RecordingSession, Dataset } from "@/types";
+
+export const sensorApi = {
+  // センサーデータの一覧取得（ページネーション対応）
+  // GET /api/v1/sensors?robot_id=xxx&sensor_type=lidar&limit=100
+  list: (params?: {
+    robot_id?: string;
+    sensor_type?: string;
+    start?: string;
+    end?: string;
+    limit?: number;
+    offset?: number;
+  }) => api.get("/sensors", { params }),
+
+  // 特定ロボットの最新センサーデータを取得
+  // GET /api/v1/sensors/robot/robot-123/latest
+  getLatest: (robotId: string, sensorType?: string) =>
+    api.get(`/sensors/robot/${robotId}/latest`, {
+      params: sensorType ? { sensor_type: sensorType } : undefined,
+    }),
+
+  // センサーデータの統計情報を取得
+  // GET /api/v1/sensors/stats?robot_id=xxx
+  // 用途: ダッシュボードでデータ量やセンサー状態を表示
+  getStats: (robotId?: string) =>
+    api.get("/sensors/stats", {
+      params: robotId ? { robot_id: robotId } : undefined,
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// 【Step 11: 記録セッション API】 — Recording Session Endpoints
+// ---------------------------------------------------------------------------
+//
+// 💡 記録セッションの概念:
+// 1. ユーザーが「記録開始」ボタンを押す → POST /recordings/start
+// 2. バックエンドが RecordingWorker を通じて Redis Streams からデータを取得
+// 3. データが TimescaleDB に保存される
+// 4. ユーザーが「停止」ボタンを押す → POST /recordings/{id}/stop
+// 5. セッションのデータをデータセットに変換可能
+//
+// 🔑 REST API の CRUD パターン:
+// - Create: POST   /recordings/start  （記録開始）
+// - Read:   GET    /recordings         （一覧取得）
+// - Read:   GET    /recordings/{id}    （詳細取得）
+// - Update: POST   /recordings/{id}/stop （停止 — 状態変更なので POST）
+// - Delete: DELETE /recordings/{id}    （削除）
+//
+export const recordingApi = {
+  // 記録セッション一覧を取得
+  // GET /api/v1/recordings?robot_id=xxx&is_active=true
+  list: (params?: { robot_id?: string; is_active?: boolean; limit?: number; offset?: number }) =>
+    api.get<RecordingSession[]>("/recordings", { params }),
+
+  // 特定の記録セッションの詳細を取得
+  // GET /api/v1/recordings/session-123
+  get: (id: string) =>
+    api.get<RecordingSession>(`/recordings/${id}`),
+
+  // 記録を開始する（新しいセッション作成）
+  // POST /api/v1/recordings/start
+  // body: { robot_id, config: { sensor_types, max_frequency_hz } }
+  start: (data: {
+    robot_id: string;
+    config: {
+      sensor_types: string[];
+      max_frequency_hz: number;
+      description?: string;
+    };
+  }) => api.post<RecordingSession>("/recordings/start", data),
+
+  // 記録を停止する
+  // POST /api/v1/recordings/{id}/stop
+  // なぜ PATCH ではなく POST? → 「停止」はただの更新ではなく、
+  // バックグラウンドワーカーの停止など副作用を伴うアクションだから
+  stop: (id: string) =>
+    api.post<RecordingSession>(`/recordings/${id}/stop`),
+
+  // 記録セッションを削除
+  // DELETE /api/v1/recordings/session-123
+  delete: (id: string) =>
+    api.delete(`/recordings/${id}`),
+};
+
+// ---------------------------------------------------------------------------
+// 【Step 11: データセット API】 — Dataset Endpoints
+// ---------------------------------------------------------------------------
+//
+// 💡 データセット（Dataset）は機械学習の「トレーニングデータ」の単位
+// - 記録セッションのデータをまとめて1つのデータセットにする
+// - CSV/JSON 形式でエクスポートして Python で利用可能
+// - タグやメタデータで分類・検索できる
+//
+// 🔑 標準的な RESTful CRUD:
+//   C → POST   /datasets
+//   R → GET    /datasets, GET /datasets/{id}
+//   U → PATCH  /datasets/{id}
+//   D → DELETE /datasets/{id}
+//   + Export: POST /datasets/{id}/export（特殊アクション）
+//
+export const datasetApi = {
+  // データセット一覧を取得
+  // GET /api/v1/datasets?status=ready&tags=indoor
+  list: (params?: {
+    status?: string;
+    tags?: string;
+    limit?: number;
+    offset?: number;
+  }) => api.get<Dataset[]>("/datasets", { params }),
+
+  // 特定のデータセットの詳細を取得
+  // GET /api/v1/datasets/dataset-456
+  get: (id: string) =>
+    api.get<Dataset>(`/datasets/${id}`),
+
+  // 新しいデータセットを作成
+  // POST /api/v1/datasets
+  create: (data: {
+    name: string;
+    description?: string;
+    sensor_types?: string[];
+    robot_ids?: string[];
+    tags?: string[];
+  }) => api.post<Dataset>("/datasets", data),
+
+  // データセット情報を部分更新
+  // PATCH /api/v1/datasets/dataset-456
+  update: (id: string, data: Partial<Dataset>) =>
+    api.patch<Dataset>(`/datasets/${id}`, data),
+
+  // データセットを削除
+  // DELETE /api/v1/datasets/dataset-456
+  delete: (id: string) =>
+    api.delete(`/datasets/${id}`),
+
+  // データセットをエクスポート（CSV/JSON形式）
+  // POST /api/v1/datasets/dataset-456/export
+  // 💡 なぜ POST? GET でも取得可能だが、大量データの処理は
+  // バックグラウンドジョブとして開始するため POST が適切
+  export: (id: string, format: "csv" | "json" = "json") =>
+    api.post(`/datasets/${id}/export`, { format }),
+};
+
 // ─── 今後のステップで追加される API ─────────────────────────────────────────
 //
-// Step 10 以降で以下の API クライアントが追加されます:
-//   - sensorApi    → Step 10: Realtime Dashboard
-//   - datasetApi   → Step 11: Data Management
-//   - recordingApi → Step 11: Data Management
-//   - ragApi       → Step 12: RAG Chat
+// Step 12 以降で以下の API クライアントが追加されます:
+//   - ragApi → Step 12: RAG Chat
 
 // ---------------------------------------------------------------------------
 // 【デフォルトエクスポート】

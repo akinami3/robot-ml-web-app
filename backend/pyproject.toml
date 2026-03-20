@@ -1,22 +1,22 @@
 # =============================================================================
-# Step 8: Python プロジェクト設定（認証ライブラリ追加）
+# Step 11: Python プロジェクト設定（データ記録ライブラリ追加）
 # =============================================================================
 #
-# 【Step 7 からの追加ライブラリ】
-# - passlib[bcrypt]: パスワードハッシュ（bcrypt アルゴリズム）
-# - python-jose[cryptography]: JWT トークンの生成・検証
-# - bcrypt: passlib のバックエンド
+# 【Step 8 からの追加ライブラリ（Step 11）】
+# - redis[hiredis]: Redis 非同期クライアント（Streams, Pub/Sub）
+# - structlog: 構造化ログ（JSONフォーマットのログ出力）
 #
-# 【なぜ passlib + python-jose？】
-# passlib: 複数のハッシュアルゴリズムを統一的に扱える
-# python-jose: JWT の生成・検証が簡潔（PyJWT の代替）
+# 【なぜ redis + structlog？】
+# redis: Redis Streams でセンサーデータの記録・読み取りを行う
+# structlog: 従来の print() による出力を構造化ログに置き換え、
+#            ログの検索・分析を容易にする
 #
 # =============================================================================
 
 [project]
 name = "robot-backend"
-version = "0.3.0"
-description = "Robot AI Web App — FastAPI バックエンド（認証対応）"
+version = "0.4.0"
+description = "Robot AI Web App — FastAPI バックエンド（データ記録対応）"
 requires-python = ">=3.11"
 
 dependencies = [
@@ -32,6 +32,9 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",    # パスワードハッシュ（bcrypt）
     "python-jose[cryptography]>=3.3.0",  # JWT トークン
     "bcrypt>=4.0.0",             # bcrypt バックエンド
+    # --- Step 11: データ記録 ---
+    "redis[hiredis]>=5.0.0",     # Redis 非同期クライアント + 高速パーサー
+    "structlog>=24.1.0",         # 構造化ログ
 ]
 
 [project.optional-dependencies]

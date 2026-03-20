@@ -76,6 +76,7 @@ import {
   LogOut,
   Bot,
   ChevronLeft,
+  Database,
 } from "lucide-react";
 
 /**
@@ -146,11 +147,12 @@ const navItems = [
   { to: "/navigation", label: "Navigation", icon: Navigation, role: "operator" },
   /** センサー表示 — すべてのユーザーがアクセス可能 ★Step 10 新規 */
   { to: "/sensors", label: "Sensor View", icon: Activity },
+  /** データ管理 — operator（操作者）以上の権限が必要 ★Step 11 新規 */
+  { to: "/data", label: "Data Management", icon: Database, role: "operator" },
   /** 設定 — すべてのユーザーがアクセス可能 */
   { to: "/settings", label: "Settings", icon: Settings },
 
-  // Step 11 以降で追加されるメニュー項目:
-  // { to: "/data", label: "Data Management", icon: Database },
+  // Step 12 以降で追加されるメニュー項目:
   // { to: "/rag", label: "RAG Chat", icon: MessageSquare },
 ];
 

@@ -1,28 +1,26 @@
 // =============================================================================
-// Step 5: cmd/gateway/main.go — 安全パイプライン統合版
+// Step 11: cmd/gateway/main.go — Redis Streams 統合版
 // =============================================================================
 //
-// 【Step 4 からの変更点】
-// 1. Safety コンポーネントの初期化と配線
-// 2. Hub の作成
-// 3. Server への依存性注入が増加（安全コンポーネント）
-// 4. ウォッチドッグのタイムアウト設定
+// 【Step 10 からの変更点（Step 11）】
+// 1. Redis パブリッシャーの初期化と配線
+// 2. サーバーへの Redis パブリッシャーの注入
+// 3. センサーデータが WebSocket + Redis 両方に配信される
 //
 // 【配線（Wiring）の全体像】
 //
-//   main.go が各コンポーネントを作成し、依存関係を接続する。
-//   コンポーネント自身は「自分に何が渡されるか」を知らない。
-//   → 疎結合（Loose Coupling）
+//	main.go が各コンポーネントを作成し、依存関係を接続する。
 //
-//               ┌─ EStopManager
-//               │
-//   Registry ─ MockAdapter ─┐
-//                            │
-//   Hub ──────────────────── Server
-//                            │
-//               ├─ VelocityLimiter ─── EStopManager（参照）
-//               ├─ TimeoutWatchdog ─── EStopManager（参照）
-//               └─ OperationLock
+//	            ┌─ EStopManager
+//	            │
+//	Registry ─ MockAdapter ─┐
+//	                         │
+//	Hub ──────────────────── Server
+//	                         │
+//	            ├─ VelocityLimiter ─── EStopManager（参照）
+//	            ├─ TimeoutWatchdog ─── EStopManager（参照）
+//	            ├─ OperationLock
+//	            └─ RedisPublisher ★Step 11 新規
 //
 // =============================================================================
 package main
@@ -30,10 +28,12 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 
 	"github.com/robot-ai-webapp/gateway/internal/adapter"
 	"github.com/robot-ai-webapp/gateway/internal/adapter/mock"
+	"github.com/robot-ai-webapp/gateway/internal/bridge"
 	"github.com/robot-ai-webapp/gateway/internal/safety"
 	"github.com/robot-ai-webapp/gateway/internal/server"
 )
@@ -99,15 +99,41 @@ func main() {
 	hub := server.NewHub()
 
 	// =================================================================
-	// 4. サーバーの起動
+	// 4. Redis パブリッシャーの初期化（Step 11 で新規追加）
+	// =================================================================
+	//
+	// 【環境変数から Redis URL を取得】
+	// 環境変数 REDIS_URL が設定されていれば Redis に接続する。
+	// 設定されていなければ、Redis なしで動作する（Graceful Degradation）。
+	//
+	// 【Graceful Degradation（優雅な劣化）とは？】
+	// 一部の機能が利用できなくても、アプリ全体は動作し続ける設計パターン。
+	// Redis がなくても WebSocket 通信は動く。データ記録だけが無効になる。
+	var publisher *bridge.RedisPublisher
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379/0" // デフォルト URL
+	}
+
+	pub, err := bridge.NewRedisPublisher(redisURL)
+	if err != nil {
+		// Redis 接続失敗してもサーバーは起動する（Graceful Degradation）
+		log.Printf("⚠️ Redis 接続失敗（データ記録無効）: %v", err)
+		publisher = nil
+	} else {
+		publisher = pub
+		defer publisher.Close()
+		log.Println("📊 Redis パブリッシャー初期化完了（データ記録有効）")
+	}
+
+	// =================================================================
+	// 5. サーバーの起動
 	// =================================================================
 	//
 	// 【依存性注入の数が増えた】
 	// Step 4: NewServer(adapter, port)
 	// Step 5: NewServer(adapter, hub, estop, limiter, watchdog, opLock, port)
-	//
-	// 引数が多いのは「責務が増えた」ため。
-	// 将来的には Config 構造体や Builder パターンを使って整理する。
+	// Step 11: NewServer(adapter, hub, estop, limiter, watchdog, opLock, publisher, port)
 	srv := server.NewServer(
 		robotAdapter,
 		hub,
@@ -115,6 +141,7 @@ func main() {
 		limiter,
 		watchdog,
 		opLock,
+		publisher,
 		":8080",
 	)
 

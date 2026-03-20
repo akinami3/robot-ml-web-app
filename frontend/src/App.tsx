@@ -39,8 +39,7 @@
 //   /settings    → SettingsPage（設定）
 //   *（それ以外）→ / にリダイレクト
 //
-// 【Step 11 以降で追加されるルート】
-//   /data        → DataManagementPage（データ管理）
+// 【Step 12 以降で追加されるルート】
 //   /rag         → RAGChatPage（AIチャット）
 // =============================================================================
 
@@ -88,6 +87,10 @@ import { SensorViewPage } from "@/pages/SensorViewPage";
 // SettingsPage: 設定ページ
 // テーマ切替、安全制限値、レコーディング設定などを管理する
 import { SettingsPage } from "@/pages/SettingsPage";
+
+// DataManagementPage: データ管理ページ ★Step 11 新規
+// 記録セッションの開始/停止、データセットの作成・管理を行う
+import { DataManagementPage } from "@/pages/DataManagementPage";
 
 // useAuthStore: 認証ストア（ログイン状態を管理）
 // ProtectedRoute で「ログインしているか？」を確認するために使用
@@ -200,8 +203,10 @@ export default function App() {
         {/* 設定: /settings */}
         <Route path="settings" element={<SettingsPage />} />
 
-        {/* Step 11 以降で追加されるルート:
-            <Route path="data" element={<DataManagementPage />} />
+        {/* データ管理: /data — Step 11 新規 */}
+        <Route path="data" element={<DataManagementPage />} />
+
+        {/* Step 12 以降で追加されるルート:
             <Route path="rag" element={<RAGChatPage />} />
         */}
       </Route>

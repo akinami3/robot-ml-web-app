@@ -1,26 +1,21 @@
 // =============================================================================
-// Step 5: WebSocket サーバー — Hub + Handler + Safety 統合版
+// Step 11: WebSocket サーバー — Hub + Handler + Safety + Redis Streams 統合版
 // =============================================================================
 //
-// 【Step 4 からの変更点】
-// 1. Hub を使ったマルチクライアント対応
-// 2. Handler で安全パイプラインを統合
-// 3. readPump / writePump を Client 単位に分離
-// 4. センサーデータの Hub 経由ブロードキャスト
-// 5. 接続時のクライアントID生成
+// 【Step 10 からの変更点（Step 11）】
+// ・Redis パブリッシャーの統合: センサーデータを Redis Streams にも発行
+// ・Publisher フィールドを Server 構造体に追加
+// ・sensorBroadcastLoop で WebSocket ブロードキャスト + Redis 発行を並行実行
 //
-// 【アーキテクチャの変化】
+// 【アーキテクチャ】
 //
-// Step 4:
-//   Client ── 1:1 ── Server ── Adapter
-//
-// Step 5:
-//   Client A ──┐
-//              ├── Hub ── Handler ── Safety Pipeline ── Adapter
-//   Client B ──┘
-//              ↑
-//          Broadcast
-//          (Sensor)
+//	Client A ──┐
+//	           ├── Hub ── Handler ── Safety Pipeline ── Adapter
+//	Client B ──┘
+//	           ↑
+//	       Broadcast    → Redis Streams（★Step 11 新規）
+//	       (Sensor)       ↓
+//	                    Backend（Python）がデータ永続化
 //
 // =============================================================================
 package server
@@ -36,6 +31,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/robot-ai-webapp/gateway/internal/adapter"
+	"github.com/robot-ai-webapp/gateway/internal/bridge"
 	"github.com/robot-ai-webapp/gateway/internal/protocol"
 	"github.com/robot-ai-webapp/gateway/internal/safety"
 )
@@ -53,29 +49,31 @@ import (
 var clientCounter atomic.Int64
 
 // =============================================================================
-// Server 構造体（Step 5 版）
+// Server 構造体（Step 11 版 — Redis Publisher 追加）
 // =============================================================================
 type Server struct {
-	adapter  adapter.RobotAdapter
-	hub      *Hub
-	handler  *Handler
-	estop    *safety.EStopManager
-	watchdog *safety.TimeoutWatchdog
-	codec    protocol.Codec
-	upgrader websocket.Upgrader
-	port     string
+	adapter   adapter.RobotAdapter
+	hub       *Hub
+	handler   *Handler
+	estop     *safety.EStopManager
+	watchdog  *safety.TimeoutWatchdog
+	publisher *bridge.RedisPublisher // ★Step 11: Redis Streams パブリッシャー（nil 許容）
+	codec     protocol.Codec
+	upgrader  websocket.Upgrader
+	port      string
 }
 
 // =============================================================================
-// NewServer — サーバーのコンストラクタ（Step 5 版）
+// NewServer — サーバーのコンストラクタ（Step 11 版）
 // =============================================================================
 //
 // 【引数が増えた理由】
 // Step 4: adapter と port だけ
 // Step 5: 安全コンポーネント（estop, limiter, watchdog, opLock）も受け取る
+// Step 11: Redis パブリッシャー（publisher）も受け取る
 //
-// これは「依存性が増えた」ことを意味する。
-// Step 6 以降ではさらに増えるため、将来的には Config 構造体にまとめる。
+// publisher は nil でもOK（Redis 未接続でもサーバーは動作する）。
+// これは「Graceful Degradation（優雅な劣化）」パターン。
 func NewServer(
 	robotAdapter adapter.RobotAdapter,
 	hub *Hub,
@@ -83,17 +81,19 @@ func NewServer(
 	limiter *safety.VelocityLimiter,
 	watchdog *safety.TimeoutWatchdog,
 	opLock *safety.OperationLock,
+	publisher *bridge.RedisPublisher,
 	port string,
 ) *Server {
 	handler := NewHandler(robotAdapter, estop, limiter, watchdog, opLock, hub)
 
 	return &Server{
-		adapter:  robotAdapter,
-		hub:      hub,
-		handler:  handler,
-		estop:    estop,
-		watchdog: watchdog,
-		codec:    protocol.NewJSONCodec(),
+		adapter:   robotAdapter,
+		hub:       hub,
+		handler:   handler,
+		estop:     estop,
+		watchdog:  watchdog,
+		publisher: publisher,
+		codec:     protocol.NewJSONCodec(),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -184,11 +184,11 @@ func (s *Server) sendAdapterInfo(client *Client) {
 			"connected":    s.adapter.IsConnected(),
 			"capabilities": map[string]any{
 				"velocity_control": caps.SupportsVelocityControl,
-				"navigation":      caps.SupportsNavigation,
-				"estop":           caps.SupportsEStop,
-				"max_linear":      caps.MaxLinearVelocity,
-				"max_angular":     caps.MaxAngularVelocity,
-				"sensor_topics":   caps.SensorTopics,
+				"navigation":       caps.SupportsNavigation,
+				"estop":            caps.SupportsEStop,
+				"max_linear":       caps.MaxLinearVelocity,
+				"max_angular":      caps.MaxAngularVelocity,
+				"sensor_topics":    caps.SensorTopics,
 			},
 			// Step 5 追加: 安全状態も含める
 			"estop_active": s.estop.IsActive(),
@@ -253,12 +253,12 @@ func (s *Server) readPump(client *Client) {
 // sensorBroadcastLoop — センサーデータを Hub 経由で全クライアントに配信
 // =============================================================================
 //
-// 【Step 4 との違い】
-// Step 4: writePump が直接 conn に書き込み
+// 【Step 11 での変更点】
 // Step 5: Hub.Broadcast() で全クライアントに配信
+// Step 11: Hub.Broadcast() + Redis Streams にも発行
 //
-// これにより、新しいクライアントが接続しても
-// 追加のgoroutineを起動する必要がない。
+// Redis への発行はベストエフォート（失敗してもログを出すだけ）。
+// WebSocket ブロードキャストは常に実行される。
 func (s *Server) sensorBroadcastLoop(ctx context.Context) {
 	sensorCh := s.adapter.SensorDataChannel()
 
@@ -274,8 +274,17 @@ func (s *Server) sensorBroadcastLoop(ctx context.Context) {
 				return
 			}
 
+			// WebSocket クライアントにブロードキャスト（従来通り）
 			msg := sensorDataToMessage(data)
 			s.hub.Broadcast(msg)
+
+			// ★Step 11: Redis Streams にも発行（nil チェックで安全に）
+			// publisher が nil の場合はスキップ（Redis 未接続でも動作する）
+			if s.publisher != nil {
+				if err := s.publisher.PublishSensorData(ctx, data.RobotID, data); err != nil {
+					log.Printf("⚠️ Redis 発行エラー: %v", err)
+				}
+			}
 		}
 	}
 }
