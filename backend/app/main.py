@@ -1,125 +1,148 @@
 # =============================================================================
-# Step 6: FastAPI メインアプリケーション
+# Step 7: FastAPI メインアプリケーション（データベース対応版）
 # =============================================================================
 #
-# 【FastAPI とは？】
-# Python の高速な Web フレームワーク。
-# 型ヒント（Type Hints）を活用して、
-# 自動でリクエスト/レスポンスのバリデーションと API ドキュメント生成を行う。
+# 【Step 6 からの変更点】
+# 1. lifespan コンテキストマネージャの追加（DB 接続の管理）
+# 2. 説明文の更新（Step 7: Database）
 #
-# 他のフレームワークとの比較:
-#   Flask:   シンプルだが、型チェックやドキュメントは手動
-#   Django:  フルスタック（ORM、管理画面など全部入り）だが重い
-#   FastAPI: 軽量 + 型安全 + 自動ドキュメント → API 開発に最適
+# 【lifespan とは？】
+# FastAPI 0.93+ で導入された、アプリケーションの
+# 起動処理（startup）と終了処理（shutdown）を管理する仕組み。
 #
-# 【ASGI とは？】
-# Asynchronous Server Gateway Interface の略。
-# Python Web アプリとサーバーの間の非同期インターフェース。
-# WSGI（同期版）のスーパーセットで、WebSocket にも対応。
+# 旧方式:
+#   @app.on_event("startup")
+#   async def startup(): ...
 #
-# 【起動方法】
-#   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-#   → app/main.py の app 変数（FastAPI インスタンス）を起動
+# 新方式（lifespan）:
+#   @asynccontextmanager
+#   async def lifespan(app):
+#       # 起動処理
+#       yield
+#       # 終了処理
+#
+# lifespan の方が:
+# - 起動/終了が1つの関数にまとまる（見やすい）
+# - リソースの確保/解放が try/finally で安全に書ける
+# - テスト時にモックしやすい
 #
 # =============================================================================
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import robots
+from app.infrastructure.database.connection import engine
+
+
+# =============================================================================
+# lifespan — アプリケーションのライフサイクル管理
+# =============================================================================
+#
+# 【async context manager とは？】
+# `async with` で使えるオブジェクト。
+# Python の `contextlib.asynccontextmanager` デコレータで作成できる。
+#
+# yield の前: アプリ起動時に実行（DB 接続確認など）
+# yield:      アプリが動いている間
+# yield の後: アプリ終了時に実行（DB 接続のクリーンアップ）
+#
+# 【なぜ engine.dispose() が必要？】
+# SQLAlchemy の AsyncEngine はコネクションプール（接続のプール）を持つ。
+# アプリ終了時にプール内の全接続を適切に閉じないと、
+# DB 側で接続がリークする。
+#
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """アプリケーションの起動・終了処理"""
+    # --- 起動時 ---
+    print("🚀 データベース接続を確認中...")
+    # engine は connection.py で遅延作成されるため、
+    # ここでテスト接続を行う（省略可能だがデバッグに便利）
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                # SQLAlchemy の text() を使わず、シンプルに接続テスト
+                __import__("sqlalchemy").text("SELECT 1")
+            )
+        print("✅ データベース接続成功")
+    except Exception as e:
+        print(f"⚠️ データベース接続失敗: {e}")
+        print("  → PostgreSQL が起動しているか確認してください")
+
+    yield  # ← アプリケーション稼働中
+
+    # --- 終了時 ---
+    print("🛑 データベース接続を閉じています...")
+    await engine.dispose()
+    print("✅ クリーンアップ完了")
+
 
 # =============================================================================
 # FastAPI アプリケーションの作成
 # =============================================================================
-#
-# title, version, description は自動生成される API ドキュメント（/docs）に表示される。
-# OpenAPI 仕様に準拠したドキュメントが自動で作られるため、
-# フロントエンドの開発者がどんな API があるか一目でわかる。
 app = FastAPI(
     title="Robot AI Web App API",
-    version="0.1.0",
-    description="Step 6: REST API — ロボット管理 API（インメモリ版）",
+    version="0.2.0",
+    description="Step 7: Database — PostgreSQL + SQLAlchemy による永続化",
+    lifespan=lifespan,  # ← Step 7 で追加
 )
 
 # =============================================================================
-# CORS ミドルウェア
+# CORS ミドルウェア（Step 6 と同じ）
 # =============================================================================
-#
-# 【CORS とは？】
-# Cross-Origin Resource Sharing（オリジン間リソース共有）。
-#
-# ブラウザのセキュリティ機能として、異なるオリジン（ドメイン:ポート）への
-# リクエストはデフォルトでブロックされる。
-#
-# 例: フロントエンド (localhost:3000) → バックエンド (localhost:8000)
-# → ポートが違うため「異なるオリジン」とみなされる！
-#
-# そこで、バックエンド側で「このオリジンからのリクエストを許可する」と宣言する。
-# これが CORS 設定。
-#
-# 【なぜ必要？】
-# Step 5 まではフロントエンドから Gateway (8080) へ WebSocket で接続していた。
-# WebSocket には CORS 制限がない（ブラウザの Same-Origin Policy が緩い）が、
-# fetch() による HTTP リクエストには CORS が厳密に適用される。
-#
-# 【各パラメータの意味】
-# allow_origins: 許可するオリジンのリスト（"*" は全許可。開発用）
-# allow_methods: 許可する HTTP メソッド（"*" は全許可）
-# allow_headers: 許可するリクエストヘッダー
-# allow_credentials: Cookie / Authorization ヘッダーの送信を許可
-#
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],            # 開発中は全許可（本番では制限する）
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],            # GET, POST, PUT, DELETE すべて許可
-    allow_headers=["*"],            # Authorization ヘッダーなど
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # =============================================================================
 # ルーターの登録
 # =============================================================================
-#
-# 【Router とは？】
-# エンドポイント（URL パス + HTTP メソッド）のグループ。
-# FastAPI の APIRouter を使い、機能ごとにファイルを分割できる。
-#
-# prefix="/api/v1": すべてのエンドポイントに /api/v1 が付く。
-#   例: robots.py の @router.get("/robots") → GET /api/v1/robots
-#
-# なぜ /api/v1 とバージョンを付けるのか？
-#   API の仕様が変わったときに /api/v2 を追加できる。
-#   古いクライアントは /api/v1 を使い続ければ壊れない。
-#   これを「APIバージョニング」と呼ぶ。
-#
 app.include_router(
     robots.router,
     prefix="/api/v1",
-    tags=["robots"],                # API ドキュメントでのグループ名
+    tags=["robots"],
 )
 
 
 # =============================================================================
-# ヘルスチェックエンドポイント
+# ヘルスチェック（Step 7: DB 接続状態も確認）
 # =============================================================================
 #
-# 【ヘルスチェックとは？】
-# アプリケーションが正常に動作しているかを確認する軽量なエンドポイント。
-# Docker Compose や ロードバランサーが定期的にアクセスして、
-# 応答があればサービスは「健康」と判断する。
+# 【なぜ DB チェックを追加？】
+# Step 6 ではバックエンド単体が動けば OK だった。
+# Step 7 では DB が落ちていると API は正常に機能しない。
+# ヘルスチェックで DB 接続も確認することで、
+# Docker Compose のヘルスチェックが DB 障害を検知できる。
 #
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "backend"}
+    """ヘルスチェック（DB 接続確認付き）"""
+    db_ok = False
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        pass
+
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "service": "backend",
+        "database": "connected" if db_ok else "disconnected",
+    }
 
 
-# =============================================================================
-# ルートエンドポイント
-# =============================================================================
 @app.get("/")
 async def root():
     return {
         "message": "Robot AI Web App API",
         "docs": "/docs",
-        "version": "0.1.0",
+        "version": "0.2.0",
     }

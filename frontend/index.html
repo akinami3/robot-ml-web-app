@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
   =============================================================================
-  Step 6: REST API + ハッシュルーター — フロントエンド
+  Step 7: Database — PostgreSQL + SQLAlchemy による永続化
   =============================================================================
 
-  【Step 5 からの変更点】
-  1. ハッシュルーター導入 → 複数ページ構成（SPA）
-  2. ナビゲーションバーの追加
-  3. REST API でロボット管理（CRUD）
-  4. リアルタイム制御は「ページ」として分離
+  【Step 6 からの変更点】
+  1. バックエンドが PostgreSQL データベースに接続
+  2. ロボットデータが永続化される（再起動しても消えない）
+  3. フロントエンドの変更はほぼなし（API の形が同じだから！）
+  4. Clean Architecture: ドメイン層 / インフラ層の分離
 
   【ページ構成】
     #/           → ロボット一覧（ダッシュボード）
@@ -39,7 +39,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Step 6: REST API + ルーター 🌐</title>
+  <title>Step 7: Database 🗄️</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 
@@ -55,7 +55,7 @@
     <div class="navbar-brand">
       <span class="brand-icon">🤖</span>
       <span class="brand-name">Robot AI Web App</span>
-      <span class="brand-step">Step 6</span>
+      <span class="brand-step">Step 7</span>
     </div>
 
     <div class="navbar-links">
@@ -90,7 +90,7 @@
        フッター
        ================================================================ -->
   <footer class="footer">
-    <span>Step 6: REST API — FastAPI + fetch() + ハッシュルーター</span>
+    <span>Step 7: Database — PostgreSQL + SQLAlchemy + Clean Architecture</span>
   </footer>
 
   <script type="module" src="./js/app.js"></script>

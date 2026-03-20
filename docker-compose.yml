@@ -1,37 +1,88 @@
 # =============================================================================
-# Step 6: Docker Compose — 3サービス構成
+# Step 7: Docker Compose — 4サービス構成（PostgreSQL 追加）
 # =============================================================================
 #
-# 【Step 5 からの変更点】
-# Step 5: gateway + frontend の2サービス
-# Step 6: gateway + frontend + backend の3サービス（← 新規追加！）
+# 【Step 6 からの変更点】
+# Step 6: gateway + frontend + backend の3サービス
+# Step 7: gateway + frontend + backend + db の4サービス（PostgreSQL 追加）
 #
-# 【3サービスの役割】
-# ┌──────────┐    HTTP     ┌──────────┐
-# │ frontend │ ──fetch()──→│ backend  │  ← FastAPI（REST API）
-# │ (nginx)  │             │ (Python) │
-# │ :3000    │             │ :8000    │
-# └──────────┘             └──────────┘
+# 【4サービスの構成図】
+#
+# ┌──────────┐    HTTP     ┌──────────┐     SQL      ┌──────────┐
+# │ frontend │ ──fetch()──→│ backend  │ ──asyncpg──→ │    db    │
+# │ (nginx)  │             │ (Python) │              │(Postgres)│
+# │ :3000    │             │ :8000    │              │ :5432    │
+# └──────────┘             └──────────┘              └──────────┘
 #       │
 #       │ WebSocket
 #       ▼
 # ┌──────────┐
-# │ gateway  │  ← Go（リアルタイム通信）
+# │ gateway  │
 # │ (Go)     │
 # │ :8080    │
 # └──────────┘
 #
-# フロントエンドは2つのバックエンドと通信する:
-#   1. backend (REST API): ロボット管理（CRUD）
-#   2. gateway (WebSocket): リアルタイム制御・センサーデータ
+# 【データの流れ】
+# 1. ユーザー → フロントエンド: ブラウザで操作
+# 2. フロントエンド → バックエンド: fetch() で REST API 呼び出し
+# 3. バックエンド → DB: SQLAlchemy + asyncpg で SQL 実行
+# 4. DB → バックエンド → フロントエンド → ユーザー: 結果を返す
 #
-# 【networks の意味】
-# Docker Compose はデフォルトで同一ネットワークを作成する。
-# 明示的に定義することで、どのサービスが通信できるか明確にする。
+# リアルタイム通信（WebSocket）は引き続き Gateway 経由。
+# REST API（CRUD）はバックエンド → DB 経由。
 #
 # =============================================================================
 
 services:
+
+  # ===========================================================================
+  # PostgreSQL データベース — Step 7 新規
+  # ===========================================================================
+  #
+  # 【PostgreSQL とは？】
+  # オープンソースのリレーショナルデータベース。
+  # MySQL と並ぶ人気の RDBMS だが、以下の点で優れる:
+  #   - JSON/JSONB 型のネイティブサポート
+  #   - UUID 型のネイティブサポート
+  #   - 高度なインデックス（GiST, GIN）
+  #   - より厳密な SQL 標準準拠
+  #
+  # 【Docker で DB を動かす利点】
+  # - ホスト OS にインストール不要
+  # - `docker compose up` 一発で起動
+  # - 環境変数でユーザー/DB/パスワードを設定
+  # - volumes でデータを永続化
+  #
+  # 【環境変数の意味】
+  # POSTGRES_USER:     スーパーユーザー名
+  # POSTGRES_PASSWORD: パスワード
+  # POSTGRES_DB:       初期作成するデータベース名
+  #
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: robot
+      POSTGRES_PASSWORD: robot
+      POSTGRES_DB: robotdb
+    volumes:
+      # --- データの永続化 ---
+      # named volume を使うことで、コンテナを削除してもデータが残る。
+      # `docker compose down` ではボリュームは削除されない。
+      # `docker compose down -v` でボリュームも削除。
+      - pgdata:/var/lib/postgresql/data
+
+      # --- 初期化スクリプト ---
+      # /docker-entrypoint-initdb.d/ に .sql/.sh ファイルを置くと、
+      # DB の初回起動時に自動実行される（2回目以降は実行されない）。
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      # pg_isready: PostgreSQL が接続を受け付けるかチェック
+      test: ["CMD-SHELL", "pg_isready -U robot -d robotdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   # ===========================================================================
   # Gateway サービス（Go WebSocket サーバー）— Step 3 から継続
@@ -50,22 +101,28 @@ services:
       retries: 3
 
   # ===========================================================================
-  # Backend サービス（Python FastAPI）— Step 6 新規
+  # Backend サービス（Python FastAPI）— Step 7 更新
   # ===========================================================================
   #
-  # 【build セクション】
-  # context: ./backend をビルドコンテキストに指定
-  # dockerfile: Dockerfile.dev を使用（開発用、--reload 付き）
+  # 【Step 6 からの変更点】
+  #   - DATABASE_URL 環境変数を追加
+  #   - depends_on: db（DB 起動後にバックエンドを起動）
+  #   - Alembic マイグレーション用の command を追加
   #
-  # 【volumes セクション】
-  # ./backend:/app でホストのソースコードをコンテナにマウント。
-  # これにより、ホスト側でファイルを編集すると、
-  # uvicorn の --reload がファイル変更を検知して自動リスタートする。
-  # → コンテナの再ビルドなしに、コード変更がすぐ反映される！
+  # 【depends_on と condition】
+  # depends_on はサービスの起動順序を制御する。
+  # condition: service_healthy を指定すると、
+  # DB のヘルスチェックが通るまでバックエンドの起動を待つ。
   #
-  # 【ports セクション】
-  # 8000:8000 でバックエンドの API をホストから直接アクセスできるようにする。
-  # → ブラウザで http://localhost:8000/docs にアクセスすると API ドキュメントが見える
+  # これがないと、DB がまだ準備できていない状態で
+  # バックエンドが接続しようとしてエラーになる。
+  #
+  # 【command の意味】
+  # デフォルトの CMD (uvicorn ...) を上書きして、
+  # 起動前に Alembic マイグレーションを実行する。
+  # `&&` で2つのコマンドを連結:
+  #   1. alembic upgrade head  → DB スキーマを最新に
+  #   2. uvicorn ...           → API サーバーを起動
   #
   backend:
     build:
@@ -75,6 +132,20 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+    environment:
+      # 【DATABASE_URL の形式】
+      # postgresql+asyncpg://ユーザー:パスワード@ホスト:ポート/データベース名
+      #
+      # ホスト名が "db" なのは、Docker Compose のサービス名。
+      # Docker Compose は自動的にサービス名で名前解決できる。
+      # → コンテナ内から "db" でアクセスすると、db コンテナに接続する。
+      DATABASE_URL: "postgresql+asyncpg://robot:robot@db:5432/robotdb"
+      DATABASE_URL_SYNC: "postgresql+psycopg2://robot:robot@db:5432/robotdb"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -95,3 +166,18 @@ services:
       - gateway
       - backend
     restart: unless-stopped
+
+# =============================================================================
+# Named Volumes
+# =============================================================================
+#
+# 【Named Volume とは？】
+# Docker が管理する永続ストレージ。
+# コンテナが削除されてもデータは残る。
+#
+# 確認: docker volume ls
+# 削除: docker volume rm robot-ml-web-app_pgdata
+# 全削除: docker compose down -v
+#
+volumes:
+  pgdata:

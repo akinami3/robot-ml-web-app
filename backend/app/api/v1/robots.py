@@ -1,127 +1,85 @@
 # =============================================================================
-# Step 6: ロボット CRUD エンドポイント（インメモリ版）
+# Step 7: ロボット CRUD エンドポイント（データベース版）
 # =============================================================================
 #
-# 【CRUD とは？】
-# データ操作の基本4操作:
-#   Create（作成）→ POST
-#   Read（読取）  → GET
-#   Update（更新）→ PUT / PATCH
-#   Delete（削除）→ DELETE
+# 【Step 6 からの変更点】
+# Step 6: インメモリ辞書 (robots_db: dict) にデータを保存
+# Step 7: PostgreSQL データベースに永続化
 #
-# 【REST API の設計原則】
-# リソース指向: URL はリソース（名詞）を表す → /robots
-# HTTP メソッドで操作を表す:
-#   GET    /robots      → 一覧取得
-#   POST   /robots      → 新規作成
-#   GET    /robots/{id} → 1件取得
-#   PATCH  /robots/{id} → 部分更新
-#   DELETE /robots/{id} → 削除
+# 【変わったこと】
+# 1. `robots_db = {}` → `RobotRepository` (DI で注入)
+# 2. `uuid4()` で ID 生成 → DB が UUID を自動生成
+# 3. 辞書操作 → `await repo.create()`, `await repo.list_all()` など
+# 4. データがサーバー再起動後も残る！
 #
-# 【なぜ POST /createRobot ではなく POST /robots ?】
-# URL に動詞を入れると、操作が増えるたびに URL パスが増える。
-# リソース + HTTP メソッドの組み合わせの方が、
-# API が統一的かつ予測しやすいため、REST 設計ではこちらが推奨。
-#
-# 【インメモリ版の注意点】
-# Step 6 ではデータベースを使わず、Python の辞書（dict）にデータを保存する。
-# サーバーを再起動するとデータは消える。
-# Step 7 でデータベース（PostgreSQL）を導入して永続化する。
+# 【変わらなかったこと】
+# - URL パス（/robots, /robots/{id}）
+# - HTTP メソッド（GET, POST, PATCH, DELETE）
+# - リクエスト/レスポンスの形式（schemas.py は同じ）
+# - ステータスコード（200, 201, 404 など）
+# → REST API の設計が良ければ、内部実装の変更がインターフェースに影響しない！
 #
 # =============================================================================
 
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.v1.schemas import (
     MessageResponse,
     RobotCreate,
     RobotListResponse,
     RobotResponse,
-    RobotStatus,
     RobotUpdate,
 )
+from app.api.v1.dependencies import get_robot_repository
+from app.domain.entities.robot import Robot, RobotStatus, RobotType
+from app.domain.repositories.robot_repo import RobotRepository
 
 # =============================================================================
 # APIRouter の作成
 # =============================================================================
-#
-# 【APIRouter とは？】
-# エンドポイントをグループ化するオブジェクト。
-# main.py で `app.include_router(router, prefix="/api/v1")` とすると、
-# このファイルの全エンドポイントが /api/v1 以下に登録される。
-#
-# Go の比較:
-#   Go (gorilla/mux): r.HandleFunc("/robots", ListRobots).Methods("GET")
-#   FastAPI:          @router.get("/robots")
-#
 router = APIRouter()
 
-# =============================================================================
-# インメモリ ストア
-# =============================================================================
-#
-# 【辞書（dict）をデータストアとして使う】
-# キーは UUID（一意な識別子）、値はロボットのデータ。
-# Python の辞書検索は O(1)（ハッシュテーブル）なので、高速。
-#
-# Go との比較:
-#   Go:     var robots = make(map[uuid.UUID]*Robot)
-#   Python: robots: dict[UUID, dict] = {}
-#
-# 本番では辞書の代わりにデータベース（PostgreSQL）を使う → Step 7
-#
-robots_db: dict[UUID, dict] = {}
 
-# --- サンプルデータの初期投入 ---
-_sample_robots = [
-    {
-        "name": "TurtleBot3",
-        "robot_type": "differential",
-        "description": "教育・研究用差動二輪ロボット。ROS2 対応。",
-    },
-    {
-        "name": "Scout Mini",
-        "robot_type": "differential",
-        "description": "屋外対応の小型自律移動ロボット。",
-    },
-    {
-        "name": "MecanumBot",
-        "robot_type": "omni",
-        "description": "メカナムホイール搭載の全方向ロボット。",
-    },
-]
-
-for sample in _sample_robots:
-    _id = uuid4()
-    _now = datetime.now(timezone.utc)
-    robots_db[_id] = {
-        "id": _id,
-        "name": sample["name"],
-        "robot_type": sample["robot_type"],
-        "description": sample["description"],
-        "status": RobotStatus.OFFLINE,
-        "created_at": _now,
-        "updated_at": _now,
-    }
+# =============================================================================
+# ヘルパー: ドメインエンティティ → レスポンススキーマ 変換
+# =============================================================================
+#
+# 【なぜ変換が必要？】
+# Robot (dataclass) と RobotResponse (Pydantic) は別の型。
+# ORM → Entity はリポジトリが担当。
+# Entity → Response は API 層が担当。
+#
+# Pydantic v2 の model_validate() で変換する。
+#
+def _to_response(entity: Robot) -> RobotResponse:
+    return RobotResponse(
+        id=entity.id,
+        name=entity.name,
+        robot_type=entity.robot_type.value,
+        description=entity.description,
+        status=entity.status.value,
+        created_at=entity.created_at,
+        updated_at=entity.updated_at,
+    )
 
 
 # =============================================================================
 # GET /robots — ロボット一覧を取得
 # =============================================================================
 #
-# 【response_model とは？】
-# FastAPI が自動で行うレスポンスの「型チェック + JSON 変換」の定義。
-# RobotListResponse に合わないデータがあればエラーになる。
-# また、/docs の API ドキュメントにレスポンスの型が表示される。
+# 【Depends() による DI】
+# `repo: RobotRepository = Depends(get_robot_repository)`
 #
-# 【async def とは？】
-# Python の非同期関数宣言。FastAPI は非同期（asyncio）で動作する。
-# `await` を使って I/O 操作を非同期に実行できる。
-# Step 6 では in-memory なので async の恩恵は薄いが、
-# Step 7 で DB アクセスが入ると `await session.execute(...)` で活きてくる。
+# FastAPI がリクエスト処理時に自動で:
+# 1. get_session() を呼んで DB セッションを取得
+# 2. get_robot_repository(session) を呼んでリポジトリを生成
+# 3. そのリポジトリを repo パラメータに注入
+# 4. リクエスト完了後、セッションを自動で close
+#
+# エンドポイント関数は「リポジトリがある」ことだけ知っていればよく、
+# DB 接続の詳細は一切知らなくてよい。
 #
 @router.get(
     "/robots",
@@ -129,26 +87,27 @@ for sample in _sample_robots:
     summary="ロボット一覧の取得",
     description="登録されているすべてのロボットの一覧を返す。",
 )
-async def list_robots():
+async def list_robots(
+    repo: RobotRepository = Depends(get_robot_repository),
+):
     """全ロボットの一覧を取得する"""
-    items = [RobotResponse(**data) for data in robots_db.values()]
-    return RobotListResponse(robots=items, total=len(items))
+    robots = await repo.list_all()
+    items = [_to_response(r) for r in robots]
+    total = await repo.count()
+    return RobotListResponse(robots=items, total=total)
 
 
 # =============================================================================
 # POST /robots — 新しいロボットを登録
 # =============================================================================
 #
-# 【status_code=201 とは？】
-# HTTP ステータスコード 201 Created: リソースが正常に作成された。
-# デフォルトは 200 OK だが、Create 操作では 201 が適切。
+# 【ドメインエンティティの生成】
+# API 層でリクエスト (RobotCreate) → ドメインエンティティ (Robot) に変換し、
+# リポジトリに渡して永続化する。
 #
-# 【リクエストボディの自動バリデーション】
-# `body: RobotCreate` と書くだけで、FastAPI が:
-# 1. リクエストボディの JSON を読み取り
-# 2. RobotCreate スキーマに変換を試み
-# 3. バリデーションエラーがあれば 422 を自動で返す
-# → 手動で JSON.parse したり、フィールドを1つずつチェックする必要がない！
+# 変換の流れ:
+#   RobotCreate (Pydantic) → Robot (dataclass) → RobotModel (ORM) → DB
+#   ↑ API 層                  ↑ ドメイン層        ↑ インフラ層
 #
 @router.post(
     "/robots",
@@ -156,93 +115,75 @@ async def list_robots():
     status_code=status.HTTP_201_CREATED,
     summary="ロボットの新規登録",
 )
-async def create_robot(body: RobotCreate):
-    """
-    新しいロボットを登録する。
+async def create_robot(
+    body: RobotCreate,
+    repo: RobotRepository = Depends(get_robot_repository),
+):
+    """新しいロボットを登録する"""
+    # Pydantic スキーマ → ドメインエンティティ
+    entity = Robot(
+        name=body.name,
+        robot_type=RobotType(body.robot_type),
+        description=body.description,
+    )
 
-    - **name**: ロボットの名前（必須、1-100文字）
-    - **robot_type**: 駆動タイプ（differential / ackermann / omni）
-    - **description**: 説明文（任意）
-    """
-    robot_id = uuid4()
-    now = datetime.now(timezone.utc)
-
-    robot_data = {
-        "id": robot_id,
-        "name": body.name,
-        "robot_type": body.robot_type,
-        "description": body.description,
-        "status": RobotStatus.OFFLINE,
-        "created_at": now,
-        "updated_at": now,
-    }
-
-    robots_db[robot_id] = robot_data
-    return RobotResponse(**robot_data)
+    created = await repo.create(entity)
+    return _to_response(created)
 
 
 # =============================================================================
 # GET /robots/{robot_id} — 特定のロボットを取得
 # =============================================================================
-#
-# 【パスパラメータ】
-# {robot_id} は URL の一部で、実際の値に置き換わる。
-# 例: GET /api/v1/robots/123e4567-e89b-12d3-a456-426614174000
-#
-# FastAPI は `robot_id: UUID` の型ヒントから、自動で:
-# 1. パス文字列を UUID にパース
-# 2. 不正な UUID なら 422 エラーを返す
-#
-# 【HTTPException とは？】
-# HTTP エラーレスポンスを生成する例外。
-# raise で投げると FastAPI がキャッチしてエラーレスポンスを返す。
-# detail にはクライアントに返すエラーメッセージを書く。
-#
 @router.get(
     "/robots/{robot_id}",
     response_model=RobotResponse,
     summary="ロボットの詳細取得",
 )
-async def get_robot(robot_id: UUID):
+async def get_robot(
+    robot_id: UUID,
+    repo: RobotRepository = Depends(get_robot_repository),
+):
     """指定された ID のロボットを取得する"""
-    if robot_id not in robots_db:
+    robot = await repo.get_by_id(robot_id)
+    if robot is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ロボットが見つかりません: {robot_id}",
         )
-    return RobotResponse(**robots_db[robot_id])
+    return _to_response(robot)
 
 
 # =============================================================================
 # PATCH /robots/{robot_id} — ロボット情報を部分更新
 # =============================================================================
 #
-# 【PATCH と PUT の違い】
-# PUT:   リソース全体を置き換える（全フィールド必須）
-# PATCH: 送られたフィールドだけ更新する（部分更新）
+# 【部分更新のロジック変更】
+# Step 6: dict を直接書き換え
+# Step 7: エンティティを取得 → フィールド更新 → リポジトリで保存
 #
-# 多くの REST API では PATCH が便利なため好まれる。
-# 「名前だけ変えたい」ときに全フィールドを送るのは面倒だから。
-#
-# 【exclude_unset=True の意味】
-# `body.model_dump(exclude_unset=True)` で、
-# クライアントが「明示的に送った」フィールドだけ辞書に含める。
-# None が「送られていない」のか「意図的に None」なのかを区別できる。
+# exclude_unset=True は同じ。
+# 「送られたフィールドだけ」を更新する PATCH の仕様は変わらない。
 #
 @router.patch(
     "/robots/{robot_id}",
     response_model=RobotResponse,
     summary="ロボット情報の部分更新",
 )
-async def update_robot(robot_id: UUID, body: RobotUpdate):
+async def update_robot(
+    robot_id: UUID,
+    body: RobotUpdate,
+    repo: RobotRepository = Depends(get_robot_repository),
+):
     """指定された ID のロボット情報を更新する（部分更新）"""
-    if robot_id not in robots_db:
+    # --- 既存データの取得 ---
+    robot = await repo.get_by_id(robot_id)
+    if robot is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ロボットが見つかりません: {robot_id}",
         )
 
-    # --- 部分更新ロジック ---
+    # --- 部分更新: 送られたフィールドだけ書き換え ---
     update_data = body.model_dump(exclude_unset=True)
 
     if not update_data:
@@ -251,37 +192,39 @@ async def update_robot(robot_id: UUID, body: RobotUpdate):
             detail="更新するフィールドが指定されていません",
         )
 
-    robot = robots_db[robot_id]
-    for field, value in update_data.items():
-        robot[field] = value
+    if "name" in update_data:
+        robot.name = update_data["name"]
+    if "robot_type" in update_data:
+        robot.robot_type = RobotType(update_data["robot_type"])
+    if "description" in update_data:
+        robot.description = update_data["description"]
+    if "status" in update_data:
+        robot.status = RobotStatus(update_data["status"])
 
-    robot["updated_at"] = datetime.now(timezone.utc)
-
-    return RobotResponse(**robot)
+    updated = await repo.update(robot)
+    return _to_response(updated)
 
 
 # =============================================================================
 # DELETE /robots/{robot_id} — ロボットを削除
 # =============================================================================
-#
-# 【204 No Content vs 200 OK】
-# 削除成功時に 204 を返すのが REST の一般的パターン。
-# 204 はレスポンスボディが「空」であることを意味する。
-# ただし、削除されたリソースの情報を返したい場合は 200 でもよい。
-# ここでは確認メッセージを返すため 200 を使用。
-#
 @router.delete(
     "/robots/{robot_id}",
     response_model=MessageResponse,
     summary="ロボットの削除",
 )
-async def delete_robot(robot_id: UUID):
+async def delete_robot(
+    robot_id: UUID,
+    repo: RobotRepository = Depends(get_robot_repository),
+):
     """指定された ID のロボットを削除する"""
-    if robot_id not in robots_db:
+    # 削除前に名前を取得（メッセージ用）
+    robot = await repo.get_by_id(robot_id)
+    if robot is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"ロボットが見つかりません: {robot_id}",
         )
 
-    robot = robots_db.pop(robot_id)
-    return MessageResponse(message=f"ロボット '{robot['name']}' を削除しました")
+    await repo.delete(robot_id)
+    return MessageResponse(message=f"ロボット '{robot.name}' を削除しました")
