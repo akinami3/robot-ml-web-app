@@ -1,15 +1,27 @@
 // =============================================================================
-// Step 5: センサー可視化 + 安全パイプライン — app.js
+// Step 6: REST API + ハッシュルーター — app.js
 // =============================================================================
 //
-// 【Step 4 からの変更点】
-// 1. safety_status メッセージへの対応
-// 2. E-Stop 解除ボタンの追加
-// 3. 安全状態のリアルタイム表示（E-Stop, 速度制限）
-// 4. estop_release メッセージの送信
-// 5. status メッセージの送信（接続時に安全状態を問い合わせ）
+// 【Step 5 からの変更点】
+// 1. ハッシュルーター導入 → 複数ページ構成
+// 2. REST API クライアント追加（fetch() でバックエンドと通信）
+// 3. ロボット一覧・登録ページの追加
+// 4. リアルタイム制御を「ページ」として分離
+//
+// 【ファイル構成の変化】
+// Step 5:
+//   app.js ← 全ロジックが1ファイル
+//
+// Step 6:
+//   app.js ← ルーター + グローバル状態 + WS 管理
+//   router.js ← ルーター本体
+//   api.js ← REST API クライアント
+//   pages/robot-list.js ← ロボット一覧ページ
+//   pages/robot-form.js ← ロボット登録/編集ページ
+//   pages/control.js ← リアルタイム制御ページ
 //
 // =============================================================================
+
 import {
   MessageType,
   KeyBindings,
@@ -24,18 +36,84 @@ import {
 } from "./protocol.js";
 
 import { WebSocketClient } from "./websocket-client.js";
-import { LidarViewer } from "./sensors/lidar-viewer.js";
-import { ImuChart } from "./sensors/imu-chart.js";
-import { BatteryGauge } from "./sensors/battery-gauge.js";
-import { OdometryViewer } from "./sensors/odometry.js";
+import { Router } from "./router.js";
+import { renderRobotListPage } from "./pages/robot-list.js";
+import { renderRobotFormPage } from "./pages/robot-form.js";
+import { renderControlPage } from "./pages/control.js";
 
 // =============================================================================
-// センサービューアの初期化
+// ルーターのセットアップ
 // =============================================================================
-const lidarViewer = new LidarViewer("lidarCanvas");
-const imuChart = new ImuChart("imuCanvas", "imuLegend");
-const batteryGauge = new BatteryGauge("batteryGauge");
-const odomViewer = new OdometryViewer("odomCanvas", "odomValues");
+//
+// 【ルーティングテーブル】
+// URL ハッシュとページ描画関数の対応表。
+//
+//   #/           → ダッシュボード（ロボット一覧）
+//   #/robots     → ロボット一覧
+//   #/robots/new → ロボット新規登録
+//   #/robots/edit→ ロボット編集（パスパラメータで ID 指定）
+//   #/control    → リアルタイム制御（Step 5 の画面）
+//
+const router = new Router("page-content");
+
+router
+  .addRoute("/", renderRobotListPage)
+  .addRoute("/robots", renderRobotListPage)
+  .addRoute("/robots/new", renderRobotFormPage)
+  .addRoute("/robots/edit", renderRobotFormPage)
+  .addRoute("/control", (container) => {
+    // 制御ページは特殊: 描画後にセンサーを初期化する
+    renderControlPage(container);
+    initSensorsAfterRender();
+  })
+  .setNotFound((container, { path }) => {
+    container.innerHTML = `
+      <div class="error-message">
+        <h2>404 Not Found</h2>
+        <p>ページ「${path}」は見つかりません。</p>
+        <a href="#/" class="btn btn-primary">ホームに戻る</a>
+      </div>
+    `;
+  });
+
+// =============================================================================
+// センサービューアの遅延初期化
+// =============================================================================
+//
+// 【なぜ遅延初期化？】
+// Step 5 では最初から全センサーの Canvas が HTML にあった。
+// Step 6 ではルーターでページを切り替えるため、
+// センサーの Canvas は「制御ページ」に遷移した時点でDOMに追加される。
+// → Canvas が存在する前に初期化するとエラーになる。
+//
+// 解決策: 制御ページの描画後に初期化する。
+//
+let lidarViewer = null;
+let imuChart = null;
+let batteryGauge = null;
+let odomViewer = null;
+
+async function initSensorsAfterRender() {
+  // 動的 import — モジュールを必要な時だけ読み込む
+  const { LidarViewer } = await import("./sensors/lidar-viewer.js");
+  const { ImuChart } = await import("./sensors/imu-chart.js");
+  const { BatteryGauge } = await import("./sensors/battery-gauge.js");
+  const { OdometryViewer } = await import("./sensors/odometry.js");
+
+  lidarViewer = new LidarViewer("lidarCanvas");
+  imuChart = new ImuChart("imuCanvas", "imuLegend");
+  batteryGauge = new BatteryGauge("batteryGauge");
+  odomViewer = new OdometryViewer("odomCanvas", "odomValues");
+
+  // Hz カウンター要素を再取得
+  hzCounters.lidar.element = document.getElementById("lidarHz");
+  hzCounters.imu.element = document.getElementById("imuHz");
+  hzCounters.odom.element = document.getElementById("odomHz");
+  hzCounters.battery.element = document.getElementById("batteryHz");
+
+  // DOM 要素を再取得
+  refreshElements();
+}
 
 // =============================================================================
 // Hz カウンター
@@ -61,45 +139,56 @@ setInterval(() => {
 // =============================================================================
 let wsClient = null;
 let keyboardEnabled = false;
-let estopActive = false; // E-Stop の状態をフロントエンドでも追跡
+let estopActive = false;
 
 const WS_HOST = window.location.hostname || "localhost";
 const WS_URL = `ws://${WS_HOST}:8080/ws`;
 
 // =============================================================================
-// DOM 要素の取得
+// DOM 要素のキャッシュ
 // =============================================================================
-const elements = {
-  statusDot: document.getElementById("statusDot"),
-  statusText: document.getElementById("statusText"),
-  btnConnect: document.getElementById("btnConnect"),
-  btnDisconnect: document.getElementById("btnDisconnect"),
-  btnKeyboard: document.getElementById("btnKeyboard"),
-  messagesDiv: document.getElementById("messages"),
-  counterDiv: document.getElementById("counter"),
-  btnRobotConnect: document.getElementById("btnRobotConnect"),
-  btnRobotDisconnect: document.getElementById("btnRobotDisconnect"),
-  btnEStop: document.getElementById("btnEStop"),
-  btnEStopRelease: document.getElementById("btnEStopRelease"),
-  robotStatus: document.getElementById("robotStatus"),
-  adapterName: document.getElementById("adapterName"),
-  // Step 5: 安全状態表示
-  estopIndicator: document.getElementById("estopIndicator"),
-  velocityLimits: document.getElementById("velocityLimits"),
-  clientCount: document.getElementById("clientCount"),
-  // WASD
-  keyW: document.getElementById("keyW"),
-  keyA: document.getElementById("keyA"),
-  keyS: document.getElementById("keyS"),
-  keyD: document.getElementById("keyD"),
-  keySpace: document.getElementById("keySpace"),
-  lastCommand: document.getElementById("lastCommand"),
-};
+//
+// 【なぜ refreshElements() が必要？】
+// ルーター がページを切り替えると、container.innerHTML が書き換わる。
+// つまり古い DOM ノードは破棄され、新しいノードが生成される。
+// getElementById で取得したノードは「古いノード」への参照なので、
+// ページ遷移後は参照が無効になる。
+//
+// → ページ遷移のたびに DOM 参照を更新する必要がある。
+//
+let elements = {};
 
-hzCounters.lidar.element = document.getElementById("lidarHz");
-hzCounters.imu.element = document.getElementById("imuHz");
-hzCounters.odom.element = document.getElementById("odomHz");
-hzCounters.battery.element = document.getElementById("batteryHz");
+function refreshElements() {
+  elements = {
+    statusDot: document.getElementById("statusDot"),
+    statusText: document.getElementById("statusText"),
+    btnConnect: document.getElementById("btnConnect"),
+    btnDisconnect: document.getElementById("btnDisconnect"),
+    btnKeyboard: document.getElementById("btnKeyboard"),
+    messagesDiv: document.getElementById("messages"),
+    counterDiv: document.getElementById("counter"),
+    btnRobotConnect: document.getElementById("btnRobotConnect"),
+    btnRobotDisconnect: document.getElementById("btnRobotDisconnect"),
+    btnEStop: document.getElementById("btnEStop"),
+    btnEStopRelease: document.getElementById("btnEStopRelease"),
+    robotStatus: document.getElementById("robotStatus"),
+    adapterName: document.getElementById("adapterName"),
+    estopIndicator: document.getElementById("estopIndicator"),
+    velocityLimits: document.getElementById("velocityLimits"),
+    keyW: document.getElementById("keyW"),
+    keyA: document.getElementById("keyA"),
+    keyS: document.getElementById("keyS"),
+    keyD: document.getElementById("keyD"),
+    keySpace: document.getElementById("keySpace"),
+    lastCommand: document.getElementById("lastCommand"),
+  };
+
+  // WebSocket が接続中ならボタン状態を復元
+  if (wsClient && wsClient.isConnected) {
+    setConnectedState(true);
+    if (estopActive) setEStopState(true);
+  }
+}
 
 // =============================================================================
 // connectWebSocket
@@ -118,7 +207,6 @@ export function connectWebSocket() {
     onStateChange: (connected) => {
       if (connected) {
         addMessage("✅ サーバーに接続しました", "system");
-        // 接続直後に安全状態を問い合わせ
         setTimeout(() => {
           sendMessage(createStatusCmd());
         }, 500);
@@ -137,7 +225,7 @@ export function disconnectWebSocket() {
 }
 
 // =============================================================================
-// handleMessage — メッセージルーティング（Step 5 拡張）
+// handleMessage — メッセージルーティング
 // =============================================================================
 function handleMessage(msg) {
   switch (msg.type) {
@@ -153,7 +241,6 @@ function handleMessage(msg) {
     case MessageType.ADAPTER_INFO:
       handleAdapterInfo(msg);
       break;
-    // Step 5 追加
     case MessageType.SAFETY_STATUS:
       handleSafetyStatus(msg);
       break;
@@ -169,22 +256,22 @@ function handleSensorData(msg) {
   const data = msg.payload;
   if (!data) return;
 
-  if ("ranges" in data) {
+  if ("ranges" in data && lidarViewer) {
     lidarViewer.update(data);
     hzCounters.lidar.count++;
     return;
   }
-  if ("accel_x" in data) {
+  if ("accel_x" in data && imuChart) {
     imuChart.update(data);
     hzCounters.imu.count++;
     return;
   }
-  if ("pos_x" in data) {
+  if ("pos_x" in data && odomViewer) {
     odomViewer.update(data);
     hzCounters.odom.count++;
     return;
   }
-  if ("percentage" in data) {
+  if ("percentage" in data && batteryGauge) {
     batteryGauge.update(data);
     hzCounters.battery.count++;
     return;
@@ -192,7 +279,7 @@ function handleSensorData(msg) {
 }
 
 // =============================================================================
-// handleAdapterInfo — アダプター情報（Step 5 拡張）
+// handleAdapterInfo
 // =============================================================================
 function handleAdapterInfo(msg) {
   const info = msg.payload;
@@ -201,43 +288,22 @@ function handleAdapterInfo(msg) {
   if (elements.adapterName) elements.adapterName.textContent = info.adapter_name;
   setRobotConnected(info.connected);
 
-  // Step 5: E-Stop 状態も含まれる
   if ("estop_active" in info) {
     setEStopState(info.estop_active);
-  }
-
-  if (info.capabilities) {
-    const caps = info.capabilities;
-    addMessage(
-      `  速度制御: ${caps.velocity_control ? "✅" : "❌"} | ` +
-      `E-Stop: ${caps.estop ? "✅" : "❌"} | ` +
-      `ナビ: ${caps.navigation ? "✅" : "❌"}`,
-      "system"
-    );
   }
 }
 
 // =============================================================================
-// handleSafetyStatus — 安全状態の受信処理（Step 5 新規）
+// handleSafetyStatus
 // =============================================================================
-//
-// 【安全状態メッセージの内容】
-// {
-//   estop: { active: bool, activated_at: string },
-//   velocity_limits: { max_linear: number, max_angular: number },
-//   operation_lock: { locked: bool, owner: string, operation: string },
-//   adapter_connected: bool
-// }
 function handleSafetyStatus(msg) {
   const data = msg.payload;
   if (!data) return;
 
-  // E-Stop 状態
   if (data.estop) {
     setEStopState(data.estop.active || data.estop.Active);
   }
 
-  // 速度制限
   if (data.velocity_limits && elements.velocityLimits) {
     const lim = data.velocity_limits;
     elements.velocityLimits.textContent =
@@ -293,7 +359,6 @@ export function sendEStop() {
   addMessage("🚨 緊急停止コマンドを送信しました", "sent");
 }
 
-// Step 5 新規: E-Stop 解除
 export function sendEStopRelease() {
   if (!wsClient || !wsClient.isConnected) {
     addMessage("⚠️ サーバー未接続です", "system");
@@ -312,14 +377,8 @@ export function sendRobotDisconnect() {
 }
 
 // =============================================================================
-// E-Stop 状態管理（Step 5 新規）
+// E-Stop 状態管理
 // =============================================================================
-//
-// 【E-Stop 状態の UI 反映】
-// E-Stop がアクティブな場合:
-//   - インジケータが赤く点灯
-//   - 解除ボタンが有効になる
-//   - WASD キーボードが無効化される
 function setEStopState(active) {
   estopActive = active;
 
@@ -333,14 +392,13 @@ function setEStopState(active) {
     }
   }
 
-  // E-Stop 中は解除ボタンを有効に
   if (elements.btnEStopRelease) {
     elements.btnEStopRelease.disabled = !active;
   }
 }
 
 // =============================================================================
-// キーボード入力の処理
+// キーボード操作
 // =============================================================================
 export function toggleKeyboardControl() {
   keyboardEnabled = !keyboardEnabled;
@@ -363,7 +421,7 @@ export function toggleKeyboardControl() {
 function handleKeyDown(event) {
   if (!keyboardEnabled) return;
   if (event.repeat) return;
-  if (estopActive) return; // E-Stop 中はキーボード無効
+  if (estopActive) return;
 
   const key = event.key.toLowerCase();
   const binding = KeyBindings.get(key);
@@ -464,7 +522,7 @@ document.addEventListener("keydown", handleKeyDown);
 document.addEventListener("keyup", handleKeyUp);
 
 // =============================================================================
-// グローバル公開
+// グローバル公開（onclick で呼ぶための関数）
 // =============================================================================
 window.connectWebSocket = connectWebSocket;
 window.disconnectWebSocket = disconnectWebSocket;
@@ -473,3 +531,8 @@ window.sendEStop = sendEStop;
 window.sendEStopRelease = sendEStopRelease;
 window.sendRobotConnect = sendRobotConnect;
 window.sendRobotDisconnect = sendRobotDisconnect;
+
+// =============================================================================
+// アプリの起動
+// =============================================================================
+router.start();

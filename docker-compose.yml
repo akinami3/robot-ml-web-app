@@ -1,57 +1,41 @@
 # =============================================================================
-# Step 3: Docker Compose — 基本構成
+# Step 6: Docker Compose — 3サービス構成
 # =============================================================================
 #
-# 【Docker Compose とは？】
-# 複数のコンテナ（サービス）をまとめて起動・管理するツール。
-# このファイル1つで、以下のサービスを一括で起動できる:
-#   - gateway: Go WebSocket サーバー
-#   - frontend: Nginx で静的ファイルを配信
+# 【Step 5 からの変更点】
+# Step 5: gateway + frontend の2サービス
+# Step 6: gateway + frontend + backend の3サービス（← 新規追加！）
 #
-# 【使い方】
-#   docker compose up --build    ← ビルド＆起動
-#   docker compose down          ← 停止＆削除
-#   docker compose logs gateway  ← ログ確認
+# 【3サービスの役割】
+# ┌──────────┐    HTTP     ┌──────────┐
+# │ frontend │ ──fetch()──→│ backend  │  ← FastAPI（REST API）
+# │ (nginx)  │             │ (Python) │
+# │ :3000    │             │ :8000    │
+# └──────────┘             └──────────┘
+#       │
+#       │ WebSocket
+#       ▼
+# ┌──────────┐
+# │ gateway  │  ← Go（リアルタイム通信）
+# │ (Go)     │
+# │ :8080    │
+# └──────────┘
 #
-# 【ローカル開発（Docker なし）との違い】
-# Docker なし:
-#   ターミナル1: cd gateway && go run cmd/gateway/main.go
-#   ターミナル2: cd frontend && python -m http.server 3000
-#   → 2つのターミナルが必要、ポートがバラバラ
+# フロントエンドは2つのバックエンドと通信する:
+#   1. backend (REST API): ロボット管理（CRUD）
+#   2. gateway (WebSocket): リアルタイム制御・センサーデータ
 #
-# Docker Compose:
-#   docker compose up --build
-#   → 1コマンドで全サービス起動、ポートも固定
+# 【networks の意味】
+# Docker Compose はデフォルトで同一ネットワークを作成する。
+# 明示的に定義することで、どのサービスが通信できるか明確にする。
 #
 # =============================================================================
 
-# =============================================================================
-# バージョン指定
-# =============================================================================
-# Docker Compose V2 ではバージョン指定は不要だが、
-# 明示的に書くとどの仕様に従っているか明確になる。
-
-# =============================================================================
-# サービス定義
-# =============================================================================
 services:
 
   # ===========================================================================
-  # Gateway サービス（Go WebSocket サーバー）
+  # Gateway サービス（Go WebSocket サーバー）— Step 3 から継続
   # ===========================================================================
-  #
-  # 【build セクション】
-  # context: Dockerfile がある、ビルドコンテキストのルートディレクトリ
-  # dockerfile: 使用する Dockerfile のパス
-  #
-  # 【ports セクション】
-  # "ホスト:コンテナ" の形式。
-  # "8080:8080" = ホストの 8080 番ポートをコンテナの 8080 番に転送。
-  # → ブラウザから localhost:8080 でアクセスすると、コンテナの 8080 に届く。
-  #
-  # 【restart セクション】
-  # unless-stopped: 明示的に停止しない限り、クラッシュしても自動再起動。
-  # 開発中はサーバーが落ちても自動で復活する。
   gateway:
     build:
       context: ./gateway
@@ -59,7 +43,6 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
-    # ヘルスチェック: /health エンドポイントで生存確認
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
       interval: 10s
@@ -67,24 +50,41 @@ services:
       retries: 3
 
   # ===========================================================================
-  # Frontend サービス（Nginx 静的ファイル配信）
+  # Backend サービス（Python FastAPI）— Step 6 新規
   # ===========================================================================
   #
-  # 【Nginx とは？】
-  # 高性能な Web サーバー。ここでは HTML/CSS/JS ファイルを配信する。
-  # ブラウザが localhost:3000 にアクセスすると、
-  # Nginx が frontend/ ディレクトリのファイルを返す。
+  # 【build セクション】
+  # context: ./backend をビルドコンテキストに指定
+  # dockerfile: Dockerfile.dev を使用（開発用、--reload 付き）
   #
   # 【volumes セクション】
-  # ホストのディレクトリをコンテナにマウント（共有）する。
-  # ./frontend:/usr/share/nginx/html:ro
-  #   ホスト側: ./frontend ディレクトリ
-  #   コンテナ側: /usr/share/nginx/html（Nginx のデフォルト配信ディレクトリ）
-  #   :ro = read-only（コンテナからは読み取り専用）
+  # ./backend:/app でホストのソースコードをコンテナにマウント。
+  # これにより、ホスト側でファイルを編集すると、
+  # uvicorn の --reload がファイル変更を検知して自動リスタートする。
+  # → コンテナの再ビルドなしに、コード変更がすぐ反映される！
   #
-  # 【depends_on セクション】
-  # gateway サービスが先に起動してから frontend を起動する。
-  # WebSocket 接続先がないと、フロントエンドがエラーになるため。
+  # 【ports セクション】
+  # 8000:8000 でバックエンドの API をホストから直接アクセスできるようにする。
+  # → ブラウザで http://localhost:8000/docs にアクセスすると API ドキュメントが見える
+  #
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ===========================================================================
+  # Frontend サービス（Nginx 静的ファイル配信）— Step 3 から継続
+  # ===========================================================================
   frontend:
     image: nginx:alpine
     ports:
@@ -93,4 +93,5 @@ services:
       - ./frontend:/usr/share/nginx/html:ro
     depends_on:
       - gateway
+      - backend
     restart: unless-stopped

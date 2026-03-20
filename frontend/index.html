@@ -1,179 +1,97 @@
 <!DOCTYPE html>
 <!--
   =============================================================================
-  Step 5: 安全パイプライン — フロントエンド
+  Step 6: REST API + ハッシュルーター — フロントエンド
   =============================================================================
 
-  【Step 4 からの変更点】
-  1. 安全パネルの追加（E-Stop 状態、速度制限表示）
-  2. E-Stop 解除ボタンの追加
-  3. safety_status メッセージへの対応
-  4. E-Stop アクティブ時の視覚的フィードバック
+  【Step 5 からの変更点】
+  1. ハッシュルーター導入 → 複数ページ構成（SPA）
+  2. ナビゲーションバーの追加
+  3. REST API でロボット管理（CRUD）
+  4. リアルタイム制御は「ページ」として分離
+
+  【ページ構成】
+    #/           → ロボット一覧（ダッシュボード）
+    #/robots     → ロボット一覧
+    #/robots/new → ロボット登録フォーム
+    #/control    → リアルタイム制御（Step 5 の画面）
 
   【ファイル構成】
-  Step 5:
-    ├── index.html              ← このファイル
+  Step 6:
+    ├── index.html              ← このファイル（シェル + ナビ + ルーターコンテナ）
     ├── css/
-    │   └── style.css           ← Step 4 + 安全UI のスタイル追加
+    │   └── style.css           ← ページ追加分のスタイル
     └── js/
-        ├── protocol-base.js
-        ├── protocol.js         ← estop_release, status 追加
-        ├── websocket-client.js
-        ├── app.js              ← safety_status 対応 + E-Stop UI
-        └── sensors/            ← Step 4 と同じ
+        ├── app.js              ← ルーター統合 + WS 管理
+        ├── router.js           ← ハッシュルーター
+        ├── api.js              ← REST API クライアント（fetch）
+        ├── protocol.js         ← WS プロトコル
+        ├── protocol-base.js    ← Step 2 メッセージ
+        ├── websocket-client.js ← WS 接続管理
+        ├── pages/
+        │   ├── robot-list.js   ← ロボット一覧ページ
+        │   ├── robot-form.js   ← 登録/編集フォーム
+        │   └── control.js      ← リアルタイム制御ページ
+        └── sensors/            ← Step 4 センサービューア
   =============================================================================
 -->
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Step 5: 安全パイプライン 🛡️</title>
+  <title>Step 6: REST API + ルーター 🌐</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 
 <body>
-  <h1>🛡️ Step 5: 安全パイプライン</h1>
-
-  <div class="help">
-    💡 <strong>Step 5 の新機能:</strong> E-Stop / 速度制限 / タイムアウト監視 / 排他ロック<br>
-    安全パイプライン: コマンドは E-Stop → 速度制限 → アダプターの順でチェック。<br>
-    E-Stop 発動中は <kbd>WASD</kbd> コマンドが拒否されます。解除ボタンで復帰。
-  </div>
-
-  <!-- 接続状態 -->
-  <div class="status">
-    <div id="statusDot" class="status-dot"></div>
-    <span id="statusText">未接続</span>
-  </div>
-
-  <!-- コントロールボタン -->
-  <div class="controls">
-    <button id="btnConnect" class="btn-connect" onclick="connectWebSocket()">
-      🔌 WS接続
-    </button>
-    <button id="btnDisconnect" class="btn-disconnect" onclick="disconnectWebSocket()" disabled>
-      ❌ WS切断
-    </button>
-    <span style="color: #444;">|</span>
-    <button id="btnRobotConnect" class="btn-robot-connect" onclick="sendRobotConnect()" disabled>
-      🤖 ロボット接続
-    </button>
-    <button id="btnRobotDisconnect" class="btn-robot-disconnect" onclick="sendRobotDisconnect()" disabled>
-      ⛔ ロボット切断
-    </button>
-    <button id="btnKeyboard" class="btn-keyboard" onclick="toggleKeyboardControl()" disabled>
-      🎮 キーボード OFF
-    </button>
-  </div>
-
-  <!-- ============================================================
-       安全パネル（Step 5 新規）
-       ============================================================
-       E-Stop の状態と速度制限を常に表示する。
-       ロボットが稼働中は常に安全状態を視認できるようにする。
-       ============================================================ -->
-  <div class="safety-panel">
-    <div class="safety-header">
-      <h3>🛡️ 安全パネル</h3>
-    </div>
-    <div class="safety-grid">
-      <!-- E-Stop 状態 -->
-      <div class="safety-item">
-        <div id="estopIndicator" class="estop-indicator">✅ 正常</div>
-      </div>
-
-      <!-- E-Stop / 解除ボタン -->
-      <div class="safety-item safety-buttons">
-        <button id="btnEStop" class="btn-estop" onclick="sendEStop()" disabled title="緊急停止">
-          🛑 E-STOP
-        </button>
-        <button id="btnEStopRelease" class="btn-estop-release" onclick="sendEStopRelease()" disabled title="E-Stop 解除">
-          ✅ 解除
-        </button>
-      </div>
-
-      <!-- 速度制限 -->
-      <div class="safety-item">
-        <div class="safety-label">速度制限</div>
-        <div id="velocityLimits" class="safety-value">-- m/s | -- rad/s</div>
-      </div>
-
-      <!-- アダプター情報 -->
-      <div class="safety-item">
-        <div class="safety-label">アダプター</div>
-        <div id="adapterName" class="safety-value">--</div>
-      </div>
-
-      <div class="safety-item">
-        <div class="safety-label">ロボット状態</div>
-        <div id="robotStatus" class="safety-value">🔴 未接続</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- センサーダッシュボード（Step 4 と同じ構造） -->
-  <div class="dashboard-grid">
-    <div class="sensor-card">
-      <div class="card-header">
-        <h3>📡 LiDAR</h3>
-        <span class="card-badge" id="lidarHz">0 Hz</span>
-      </div>
-      <div class="canvas-container">
-        <canvas id="lidarCanvas" width="400" height="400"></canvas>
-      </div>
+  <!-- ================================================================
+       ナビゲーションバー（Step 6 新規）
+       ================================================================
+       SPA ではナビゲーションは常に表示され、
+       クリック時に URL のハッシュが変わりページが切り替わる。
+       <a href="#/robots"> の # がハッシュルーティングのポイント。
+       ================================================================ -->
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <span class="brand-icon">🤖</span>
+      <span class="brand-name">Robot AI Web App</span>
+      <span class="brand-step">Step 6</span>
     </div>
 
-    <div class="sensor-card">
-      <div class="card-header">
-        <h3>🧭 IMU（慣性計測装置）</h3>
-        <span class="card-badge" id="imuHz">0 Hz</span>
-      </div>
-      <div class="canvas-container">
-        <canvas id="imuCanvas" width="400" height="250"></canvas>
-      </div>
-      <div id="imuLegend"></div>
+    <div class="navbar-links">
+      <!-- data-route: ルーターが active クラスを付与するために使用 -->
+      <a href="#/" data-route="/" class="nav-link">📋 ロボット一覧</a>
+      <a href="#/robots/new" data-route="/robots/new" class="nav-link">＋ 新規登録</a>
+      <a href="#/control" data-route="/control" class="nav-link">🎮 制御</a>
     </div>
 
-    <div class="sensor-card">
-      <div class="card-header">
-        <h3>📍 オドメトリ</h3>
-        <span class="card-badge" id="odomHz">0 Hz</span>
-      </div>
-      <div class="canvas-container">
-        <canvas id="odomCanvas" width="400" height="300"></canvas>
-      </div>
-      <div id="odomValues"></div>
+    <div class="navbar-info">
+      <!-- API の接続状態を表示 -->
+      <span class="api-status" id="apiStatus">
+        <span class="api-dot"></span> API
+      </span>
     </div>
+  </nav>
 
-    <div class="sensor-card">
-      <div class="card-header">
-        <h3>🔋 バッテリー</h3>
-        <span class="card-badge" id="batteryHz">0 Hz</span>
-      </div>
-      <div id="batteryGauge"></div>
+  <!-- ================================================================
+       ページコンテンツ領域
+       ================================================================
+       ルーターがこの div の innerHTML を書き換えることで
+       ページ遷移を実現する。ナビゲーションは固定。
+       ================================================================ -->
+  <main class="main-content">
+    <div id="page-content">
+      <!-- ルーターによって動的にページが挿入される -->
+      <div class="loading">読み込み中...</div>
     </div>
+  </main>
 
-    <div class="sensor-card">
-      <div class="card-header">
-        <h3>🎮 キーボード操作</h3>
-      </div>
-      <div class="keyboard">
-        <div class="wasd-grid">
-          <div id="keyW" class="key key-w">W</div>
-          <div id="keyA" class="key">A</div>
-          <div id="keyS" class="key">S</div>
-          <div id="keyD" class="key">D</div>
-          <div id="keySpace" class="key key-space">SPACE</div>
-        </div>
-        <div id="lastCommand" class="last-command">キーボードをONにして操作</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- メッセージログ -->
-  <h2>📋 メッセージログ</h2>
-  <div id="messages" class="messages"></div>
-  <div id="counter" class="counter">送信: 0 | 受信: 0</div>
+  <!-- ================================================================
+       フッター
+       ================================================================ -->
+  <footer class="footer">
+    <span>Step 6: REST API — FastAPI + fetch() + ハッシュルーター</span>
+  </footer>
 
   <script type="module" src="./js/app.js"></script>
 </body>
