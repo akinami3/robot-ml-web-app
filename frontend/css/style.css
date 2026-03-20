@@ -1,13 +1,11 @@
 /* =============================================================================
-   Step 6: REST API + ルーター — スタイルシート
+   Step 8: Authentication — スタイルシート
    =============================================================================
 
-   【Step 5 からの変更点】
-   1. ナビゲーションバー（.navbar）の追加
-   2. ページレイアウト（.main-content + ルーターコンテナ）
-   3. ロボット一覧テーブル（.robot-table）
-   4. フォームスタイル（.robot-form）
-   5. ページヘッダー（.page-header）
+   【Step 7 からの変更点】
+   1. 認証ページ（ログイン / サインアップ）のスタイル追加
+   2. ロールバッジ（Admin / Operator / Viewer）
+   3. ナビゲーションの認証状態表示
 
    ============================================================================= */
 
@@ -28,10 +26,7 @@ h2 { color: #00d4ff; font-size: 1.15em; margin: 0; }
 h3 { margin: 0; font-size: 1em; }
 
 /* =====================================================================
-   ナビゲーションバー（Step 6 新規）
-   =====================================================================
-   SPA の「骨格」。ページが切り替わってもナビゲーションは固定。
-   position: sticky で画面上部に固定される。
+   ナビゲーションバー
    ===================================================================== */
 .navbar {
   background-color: #0f0f23;
@@ -95,7 +90,7 @@ h3 { margin: 0; font-size: 1em; }
 .navbar-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .api-status {
@@ -114,7 +109,163 @@ h3 { margin: 0; font-size: 1em; }
 }
 
 /* =====================================================================
-   メインコンテンツ（ページコンテナ）
+   認証エリア（ナビバー右側）— Step 8 新規
+   =====================================================================
+   ログイン状態: ユーザー名 + ロールバッジ + ログアウトボタン
+   未ログイン:   ログインボタン
+   ===================================================================== */
+#authArea {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.auth-username {
+  color: #e0e0e0;
+  font-weight: bold;
+}
+
+/* --- ロールバッジ ---
+   RBAC（Role-Based Access Control）の視覚的表示。
+   ユーザーが自分の権限を即座に認識できるようにする。
+*/
+.role-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.role-admin {
+  background-color: #dc3545;
+  color: white;
+}
+
+.role-operator {
+  background-color: #ffc107;
+  color: #1a1a2e;
+}
+
+.role-viewer {
+  background-color: #17a2b8;
+  color: white;
+}
+
+/* =====================================================================
+   認証ページ（ログイン / サインアップ）— Step 8 新規
+   =====================================================================
+   中央寄せのカード型レイアウト。
+   ログインフォームを画面中央に表示する定番パターン。
+   ===================================================================== */
+.auth-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px 16px;
+}
+
+.auth-card {
+  background-color: #16213e;
+  border: 1px solid #2a2a4e;
+  border-radius: 12px;
+  padding: 32px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.auth-card h2 {
+  text-align: center;
+  margin-bottom: 8px;
+  font-size: 1.4em;
+}
+
+.auth-description {
+  text-align: center;
+  color: #888;
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+.auth-form .form-group {
+  margin-bottom: 16px;
+}
+
+.auth-form .form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: bold;
+  color: #e0e0e0;
+  margin-bottom: 6px;
+}
+
+.auth-form .form-group input {
+  width: 100%;
+  padding: 10px 12px;
+  background-color: #0f0f23;
+  border: 1px solid #2a2a4e;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+.auth-form .form-group input:focus {
+  outline: none;
+  border-color: #00d4ff;
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.2);
+}
+
+.auth-form .form-group input::placeholder {
+  color: #555;
+}
+
+.btn-full {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.auth-footer {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 13px;
+  color: #888;
+}
+
+.auth-footer a {
+  color: #00d4ff;
+  text-decoration: none;
+}
+
+.auth-footer a:hover {
+  text-decoration: underline;
+}
+
+.auth-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #666;
+  background-color: #0f0f23;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+/* =====================================================================
+   メインコンテンツ
    ===================================================================== */
 .main-content {
   flex: 1;
@@ -137,9 +288,7 @@ h3 { margin: 0; font-size: 1em; }
 }
 
 /* =====================================================================
-   ページヘッダー（Step 6 新規）
-   =====================================================================
-   各ページの上部に表示。タイトルとアクションボタンを横並びにする。
+   ページヘッダー
    ===================================================================== */
 .page-header {
   display: flex;
@@ -206,7 +355,7 @@ button:disabled, .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 /* =====================================================================
-   ロボットテーブル（Step 6 新規）
+   ロボットテーブル
    ===================================================================== */
 .table-container {
   overflow-x: auto;
@@ -273,7 +422,7 @@ button:disabled, .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .status-maintenance { color: #17a2b8; }
 
 /* =====================================================================
-   フォーム（Step 6 新規）
+   フォーム
    ===================================================================== */
 .robot-form {
   max-width: 600px;
@@ -407,7 +556,7 @@ button:disabled, .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .status-dot.connected { background-color: #28a745; }
 
 /* =====================================================================
-   安全パネル（Step 5 から継続）
+   安全パネル
    ===================================================================== */
 .safety-panel {
   background-color: #16213e;
@@ -660,4 +809,9 @@ kbd {
   .dashboard-grid { grid-template-columns: 1fr; }
   .safety-grid { flex-direction: column; align-items: stretch; }
   .page-header { flex-direction: column; gap: 8px; align-items: flex-start; }
+
+  /* 認証ページのレスポンシブ */
+  .auth-card {
+    padding: 20px;
+  }
 }

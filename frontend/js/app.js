@@ -1,24 +1,20 @@
 // =============================================================================
-// Step 6: REST API + ハッシュルーター — app.js
+// Step 8: 認証対応アプリケーション — app.js
 // =============================================================================
 //
-// 【Step 5 からの変更点】
-// 1. ハッシュルーター導入 → 複数ページ構成
-// 2. REST API クライアント追加（fetch() でバックエンドと通信）
-// 3. ロボット一覧・登録ページの追加
-// 4. リアルタイム制御を「ページ」として分離
+// 【Step 7 からの変更点】
+// 1. ログイン / サインアップページの追加（#/login, #/signup）
+// 2. 認証状態に応じたナビゲーション表示
+// 3. 未認証ユーザーのリダイレクト
+// 4. ログアウト機能
+// 5. ロール（admin/operator/viewer）に応じた UI 制御
 //
-// 【ファイル構成の変化】
-// Step 5:
-//   app.js ← 全ロジックが1ファイル
+// 【認証とSPA】
+// SPAでは「ページ遷移＝JavaScript実行」なので、
+// 認証チェックもJavaScriptで行う。
 //
-// Step 6:
-//   app.js ← ルーター + グローバル状態 + WS 管理
-//   router.js ← ルーター本体
-//   api.js ← REST API クライアント
-//   pages/robot-list.js ← ロボット一覧ページ
-//   pages/robot-form.js ← ロボット登録/編集ページ
-//   pages/control.js ← リアルタイム制御ページ
+// ルートガード: 未認証ユーザーが保護されたページにアクセスしたら
+// ログインページにリダイレクトする仕組み。
 //
 // =============================================================================
 
@@ -40,32 +36,68 @@ import { Router } from "./router.js";
 import { renderRobotListPage } from "./pages/robot-list.js";
 import { renderRobotFormPage } from "./pages/robot-form.js";
 import { renderControlPage } from "./pages/control.js";
+import { renderLoginPage } from "./pages/login.js";
+import { renderSignupPage } from "./pages/signup.js";
+import { isLoggedIn, getCurrentUser, logout } from "./api.js";
+
+// =============================================================================
+// ルートガード — 認証が必要なページを保護
+// =============================================================================
+//
+// 【高階関数 (Higher-Order Function)】
+// 「関数を引数に取る関数」または「関数を返す関数」のこと。
+//
+// requireAuth は「ページ描画関数」を受け取り、
+// 「認証チェック付きのページ描画関数」を返す高階関数。
+//
+// デコレーターパターンとも呼ばれ、
+// 既存の関数に追加機能を付与するテクニック。
+//
+function requireAuth(renderFn) {
+  return (container, params) => {
+    if (!isLoggedIn()) {
+      // 未認証 → ログインページにリダイレクト
+      window.location.hash = "#/login";
+      return;
+    }
+    renderFn(container, params);
+  };
+}
 
 // =============================================================================
 // ルーターのセットアップ
 // =============================================================================
 //
-// 【ルーティングテーブル】
-// URL ハッシュとページ描画関数の対応表。
+// 【ルーティングテーブル（Step 8 版）】
 //
+//   公開ルート（認証不要）:
+//   #/login    → ログインページ
+//   #/signup   → サインアップページ
+//
+//   保護ルート（認証必要）:
 //   #/           → ダッシュボード（ロボット一覧）
 //   #/robots     → ロボット一覧
 //   #/robots/new → ロボット新規登録
-//   #/robots/edit→ ロボット編集（パスパラメータで ID 指定）
-//   #/control    → リアルタイム制御（Step 5 の画面）
+//   #/robots/edit→ ロボット編集
+//   #/control    → リアルタイム制御
 //
 const router = new Router("page-content");
 
 router
-  .addRoute("/", renderRobotListPage)
-  .addRoute("/robots", renderRobotListPage)
-  .addRoute("/robots/new", renderRobotFormPage)
-  .addRoute("/robots/edit", renderRobotFormPage)
-  .addRoute("/control", (container) => {
-    // 制御ページは特殊: 描画後にセンサーを初期化する
+  // --- 公開ルート（認証不要）---
+  .addRoute("/login", renderLoginPage)
+  .addRoute("/signup", renderSignupPage)
+
+  // --- 保護ルート（認証必要）---
+  // requireAuth() でラップすることで、未認証時にリダイレクトする
+  .addRoute("/", requireAuth(renderRobotListPage))
+  .addRoute("/robots", requireAuth(renderRobotListPage))
+  .addRoute("/robots/new", requireAuth(renderRobotFormPage))
+  .addRoute("/robots/edit", requireAuth(renderRobotFormPage))
+  .addRoute("/control", requireAuth((container) => {
     renderControlPage(container);
     initSensorsAfterRender();
-  })
+  }))
   .setNotFound((container, { path }) => {
     container.innerHTML = `
       <div class="error-message">
@@ -77,24 +109,79 @@ router
   });
 
 // =============================================================================
-// センサービューアの遅延初期化
+// ナビゲーションの認証状態表示
 // =============================================================================
 //
-// 【なぜ遅延初期化？】
-// Step 5 では最初から全センサーの Canvas が HTML にあった。
-// Step 6 ではルーターでページを切り替えるため、
-// センサーの Canvas は「制御ページ」に遷移した時点でDOMに追加される。
-// → Canvas が存在する前に初期化するとエラーになる。
+// 【dispatchEvent / addEventListener パターン】
+// カスタムイベントを使ったコンポーネント間通信。
 //
-// 解決策: 制御ページの描画後に初期化する。
+// login.js:  window.dispatchEvent(new Event("auth-changed"))
+// app.js:    window.addEventListener("auth-changed", updateAuthUI)
 //
+// → 疎結合（login.js は app.js のことを知らなくてよい）
+//
+
+function updateAuthUI() {
+  const authArea = document.getElementById("authArea");
+  if (!authArea) return;
+
+  if (isLoggedIn()) {
+    const user = getCurrentUser();
+    const roleBadge = getRoleBadge(user?.role);
+
+    authArea.innerHTML = `
+      <span class="auth-user">
+        ${roleBadge}
+        <span class="auth-username">${user?.username || "unknown"}</span>
+      </span>
+      <button class="btn btn-sm btn-secondary" id="logoutBtn">ログアウト</button>
+    `;
+
+    document.getElementById("logoutBtn")?.addEventListener("click", () => {
+      logout();
+    });
+
+    // 認証済み → 通常のナビリンクを表示
+    document.querySelectorAll(".nav-link-auth").forEach(el => {
+      el.style.display = "";
+    });
+  } else {
+    authArea.innerHTML = `
+      <a href="#/login" class="btn btn-sm btn-primary">ログイン</a>
+    `;
+
+    // 未認証 → 通常のナビリンクを非表示
+    document.querySelectorAll(".nav-link-auth").forEach(el => {
+      el.style.display = "none";
+    });
+  }
+}
+
+/**
+ * ロールに応じたバッジを返す
+ * admin: 🔴, operator: 🟡, viewer: 🟢
+ */
+function getRoleBadge(role) {
+  const badges = {
+    admin: '<span class="role-badge role-admin">Admin</span>',
+    operator: '<span class="role-badge role-operator">Operator</span>',
+    viewer: '<span class="role-badge role-viewer">Viewer</span>',
+  };
+  return badges[role] || badges.viewer;
+}
+
+// --- 認証状態の変更を監視 ---
+window.addEventListener("auth-changed", updateAuthUI);
+
+// =============================================================================
+// センサービューアの遅延初期化
+// =============================================================================
 let lidarViewer = null;
 let imuChart = null;
 let batteryGauge = null;
 let odomViewer = null;
 
 async function initSensorsAfterRender() {
-  // 動的 import — モジュールを必要な時だけ読み込む
   const { LidarViewer } = await import("./sensors/lidar-viewer.js");
   const { ImuChart } = await import("./sensors/imu-chart.js");
   const { BatteryGauge } = await import("./sensors/battery-gauge.js");
@@ -105,13 +192,11 @@ async function initSensorsAfterRender() {
   batteryGauge = new BatteryGauge("batteryGauge");
   odomViewer = new OdometryViewer("odomCanvas", "odomValues");
 
-  // Hz カウンター要素を再取得
   hzCounters.lidar.element = document.getElementById("lidarHz");
   hzCounters.imu.element = document.getElementById("imuHz");
   hzCounters.odom.element = document.getElementById("odomHz");
   hzCounters.battery.element = document.getElementById("batteryHz");
 
-  // DOM 要素を再取得
   refreshElements();
 }
 
@@ -147,15 +232,6 @@ const WS_URL = `ws://${WS_HOST}:8080/ws`;
 // =============================================================================
 // DOM 要素のキャッシュ
 // =============================================================================
-//
-// 【なぜ refreshElements() が必要？】
-// ルーター がページを切り替えると、container.innerHTML が書き換わる。
-// つまり古い DOM ノードは破棄され、新しいノードが生成される。
-// getElementById で取得したノードは「古いノード」への参照なので、
-// ページ遷移後は参照が無効になる。
-//
-// → ページ遷移のたびに DOM 参照を更新する必要がある。
-//
 let elements = {};
 
 function refreshElements() {
@@ -183,7 +259,6 @@ function refreshElements() {
     lastCommand: document.getElementById("lastCommand"),
   };
 
-  // WebSocket が接続中ならボタン状態を復元
   if (wsClient && wsClient.isConnected) {
     setConnectedState(true);
     if (estopActive) setEStopState(true);
@@ -250,7 +325,7 @@ function handleMessage(msg) {
 }
 
 // =============================================================================
-// handleSensorData — センサーデータを各ビューアに振り分け
+// handleSensorData
 // =============================================================================
 function handleSensorData(msg) {
   const data = msg.payload;
@@ -314,7 +389,7 @@ function handleSafetyStatus(msg) {
 }
 
 // =============================================================================
-// handleCommandAck — コマンド応答
+// handleCommandAck
 // =============================================================================
 function handleCommandAck(msg) {
   const { status, description } = msg.payload;
@@ -522,7 +597,7 @@ document.addEventListener("keydown", handleKeyDown);
 document.addEventListener("keyup", handleKeyUp);
 
 // =============================================================================
-// グローバル公開（onclick で呼ぶための関数）
+// グローバル公開
 // =============================================================================
 window.connectWebSocket = connectWebSocket;
 window.disconnectWebSocket = disconnectWebSocket;
@@ -535,4 +610,9 @@ window.sendRobotDisconnect = sendRobotDisconnect;
 // =============================================================================
 // アプリの起動
 // =============================================================================
+//
+// 1. 認証 UI を初期化
+// 2. ルーターを起動
+//
+updateAuthUI();
 router.start();

@@ -1,72 +1,81 @@
 <!DOCTYPE html>
 <!--
   =============================================================================
-  Step 7: Database — PostgreSQL + SQLAlchemy による永続化
+  Step 8: Authentication — JWT + bcrypt + RBAC
   =============================================================================
 
-  【Step 6 からの変更点】
-  1. バックエンドが PostgreSQL データベースに接続
-  2. ロボットデータが永続化される（再起動しても消えない）
-  3. フロントエンドの変更はほぼなし（API の形が同じだから！）
-  4. Clean Architecture: ドメイン層 / インフラ層の分離
+  【Step 7 からの変更点】
+  1. ログイン / サインアップページの追加
+  2. JWT トークンベース認証（localStorage 保存）
+  3. ナビゲーションに認証状態を表示
+  4. ロールベースアクセス制御（Admin / Operator / Viewer）
+  5. API リクエストに Authorization ヘッダーを自動付与
+
+  【認証の仕組み（全体像）】
+  1. ユーザーがログイン → サーバーが JWT を発行
+  2. フロントエンドが JWT を localStorage に保存
+  3. API リクエスト時に Authorization: Bearer <JWT> ヘッダーを付与
+  4. サーバーが JWT を検証 → ユーザーを識別
 
   【ページ構成】
-    #/           → ロボット一覧（ダッシュボード）
-    #/robots     → ロボット一覧
-    #/robots/new → ロボット登録フォーム
-    #/control    → リアルタイム制御（Step 5 の画面）
+    #/login      → ログインページ（公開）
+    #/signup     → サインアップページ（公開）
+    #/           → ロボット一覧（要認証）
+    #/robots     → ロボット一覧（要認証）
+    #/robots/new → ロボット登録フォーム（要認証）
+    #/control    → リアルタイム制御（要認証）
 
-  【ファイル構成】
-  Step 6:
-    ├── index.html              ← このファイル（シェル + ナビ + ルーターコンテナ）
-    ├── css/
-    │   └── style.css           ← ページ追加分のスタイル
-    └── js/
-        ├── app.js              ← ルーター統合 + WS 管理
-        ├── router.js           ← ハッシュルーター
-        ├── api.js              ← REST API クライアント（fetch）
-        ├── protocol.js         ← WS プロトコル
-        ├── protocol-base.js    ← Step 2 メッセージ
-        ├── websocket-client.js ← WS 接続管理
-        ├── pages/
-        │   ├── robot-list.js   ← ロボット一覧ページ
-        │   ├── robot-form.js   ← 登録/編集フォーム
-        │   └── control.js      ← リアルタイム制御ページ
-        └── sensors/            ← Step 4 センサービューア
+  【ファイル構成の変化】
+  Step 7 → Step 8:
+    ├── js/
+    │   ├── api.js              ← ★ 認証ヘッダー + リフレッシュトークン
+    │   ├── app.js              ← ★ ルートガード + 認証 UI
+    │   ├── pages/
+    │   │   ├── login.js        ← ★ 新規: ログインページ
+    │   │   ├── signup.js       ← ★ 新規: サインアップページ
+    │   │   ├── robot-list.js   ← 変更なし
+    │   │   ├── robot-form.js   ← 変更なし
+    │   │   └── control.js      ← 変更なし
+    │   └── ...（その他は変更なし）
+    └── css/
+        └── style.css           ← ★ 認証ページのスタイル追加
+
   =============================================================================
 -->
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Step 7: Database 🗄️</title>
+  <title>Step 8: Authentication 🔐</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 
 <body>
   <!-- ================================================================
-       ナビゲーションバー（Step 6 新規）
+       ナビゲーションバー（Step 8 認証対応版）
        ================================================================
-       SPA ではナビゲーションは常に表示され、
-       クリック時に URL のハッシュが変わりページが切り替わる。
-       <a href="#/robots"> の # がハッシュルーティングのポイント。
+       認証状態に応じて表示を切り替える:
+       - 未認証: 「ログイン」ボタンのみ表示
+       - 認証済: ユーザー名 + ロールバッジ + ログアウトボタン
        ================================================================ -->
   <nav class="navbar">
     <div class="navbar-brand">
       <span class="brand-icon">🤖</span>
       <span class="brand-name">Robot AI Web App</span>
-      <span class="brand-step">Step 7</span>
+      <span class="brand-step">Step 8</span>
     </div>
 
     <div class="navbar-links">
-      <!-- data-route: ルーターが active クラスを付与するために使用 -->
-      <a href="#/" data-route="/" class="nav-link">📋 ロボット一覧</a>
-      <a href="#/robots/new" data-route="/robots/new" class="nav-link">＋ 新規登録</a>
-      <a href="#/control" data-route="/control" class="nav-link">🎮 制御</a>
+      <!-- nav-link-auth: 認証済みの場合のみ表示 -->
+      <a href="#/" data-route="/" class="nav-link nav-link-auth">📋 ロボット一覧</a>
+      <a href="#/robots/new" data-route="/robots/new" class="nav-link nav-link-auth">＋ 新規登録</a>
+      <a href="#/control" data-route="/control" class="nav-link nav-link-auth">🎮 制御</a>
     </div>
 
     <div class="navbar-info">
-      <!-- API の接続状態を表示 -->
+      <!-- 認証状態を表示するエリア（app.js から動的に書き換え） -->
+      <div id="authArea"></div>
+
       <span class="api-status" id="apiStatus">
         <span class="api-dot"></span> API
       </span>
@@ -75,13 +84,9 @@
 
   <!-- ================================================================
        ページコンテンツ領域
-       ================================================================
-       ルーターがこの div の innerHTML を書き換えることで
-       ページ遷移を実現する。ナビゲーションは固定。
        ================================================================ -->
   <main class="main-content">
     <div id="page-content">
-      <!-- ルーターによって動的にページが挿入される -->
       <div class="loading">読み込み中...</div>
     </div>
   </main>
@@ -90,7 +95,7 @@
        フッター
        ================================================================ -->
   <footer class="footer">
-    <span>Step 7: Database — PostgreSQL + SQLAlchemy + Clean Architecture</span>
+    <span>Step 8: Authentication — JWT + bcrypt + Role-Based Access Control</span>
   </footer>
 
   <script type="module" src="./js/app.js"></script>

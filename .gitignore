@@ -2,10 +2,23 @@
 .DS_Store
 Thumbs.db
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
 # Go
 gateway/go.mod.orig
 gateway/go.sum.orig
 gateway/tmp/
+
+# Node
+node_modules/
+.npm
 
 # IDE
 .vscode/
@@ -17,3 +30,7 @@ gateway/tmp/
 *.exe
 *.out
 *.test
+
+# Environment
+.env
+.env.local

@@ -1,56 +1,47 @@
 # =============================================================================
-# Step 7: Python プロジェクト設定ファイル（データベース対応版）
+# Step 8: Python プロジェクト設定（認証ライブラリ追加）
 # =============================================================================
 #
-# 【Step 6 からの変更点】
-# 新しい依存ライブラリを追加:
-#   - sqlalchemy[asyncio]: ORM（Object-Relational Mapping）
-#   - asyncpg: PostgreSQL 非同期ドライバー
-#   - alembic: データベースマイグレーションツール
-#   - psycopg2-binary: Alembic 用の同期 PostgreSQL ドライバー
+# 【Step 7 からの追加ライブラリ】
+# - passlib[bcrypt]: パスワードハッシュ（bcrypt アルゴリズム）
+# - python-jose[cryptography]: JWT トークンの生成・検証
+# - bcrypt: passlib のバックエンド
 #
-# 【なぜ asyncpg と psycopg2 の2つ？】
-# asyncpg:       FastAPI のリクエスト処理（非同期 I/O）で使用
-# psycopg2:      Alembic のマイグレーション実行（同期処理）で使用
-#
-# SQLAlchemy は「ドライバー」を差し替えることで、
-# 接続方式（同期/非同期）や DB 種類（PostgreSQL/MySQL/SQLite）を変更できる。
-#   postgresql+asyncpg://...  → 非同期 PostgreSQL
-#   postgresql+psycopg2://... → 同期 PostgreSQL
-#   sqlite+aiosqlite://...    → 非同期 SQLite
+# 【なぜ passlib + python-jose？】
+# passlib: 複数のハッシュアルゴリズムを統一的に扱える
+# python-jose: JWT の生成・検証が簡潔（PyJWT の代替）
 #
 # =============================================================================
 
 [project]
 name = "robot-backend"
-version = "0.2.0"
-description = "Robot AI Web App — FastAPI バックエンド（PostgreSQL 対応）"
+version = "0.3.0"
+description = "Robot AI Web App — FastAPI バックエンド（認証対応）"
 requires-python = ">=3.11"
 
-# --- 本番依存 ---
 dependencies = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.29.0",
     "pydantic>=2.7.0",
-    # --- Step 7 で追加 ---
-    "sqlalchemy[asyncio]>=2.0.30",  # ORM + 非同期サポート
-    "asyncpg>=0.29.0",             # PostgreSQL 非同期ドライバー
-    "alembic>=1.13.0",             # DB マイグレーション
-    "psycopg2-binary>=2.9.9",     # Alembic 用同期ドライバー
+    # --- Step 7: DB ---
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "psycopg2-binary>=2.9.9",
+    # --- Step 8: 認証 ---
+    "passlib[bcrypt]>=1.7.4",    # パスワードハッシュ（bcrypt）
+    "python-jose[cryptography]>=3.3.0",  # JWT トークン
+    "bcrypt>=4.0.0",             # bcrypt バックエンド
 ]
 
-# --- 開発用依存 ---
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.23.0",    # 非同期テスト用
-    "httpx>=0.27.0",             # FastAPI の TestClient 用
-    "aiosqlite>=0.20.0",         # テスト用 SQLite 非同期ドライバー
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+    "aiosqlite>=0.20.0",
 ]
 
-# =============================================================================
-# ビルドシステム
-# =============================================================================
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"

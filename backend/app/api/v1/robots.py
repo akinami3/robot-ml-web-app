@@ -1,23 +1,20 @@
 # =============================================================================
-# Step 7: ロボット CRUD エンドポイント（データベース版）
+# Step 8: ロボット CRUD エンドポイント（認証保護版）
 # =============================================================================
 #
-# 【Step 6 からの変更点】
-# Step 6: インメモリ辞書 (robots_db: dict) にデータを保存
-# Step 7: PostgreSQL データベースに永続化
+# 【Step 7 からの変更点】
+# Step 7: 誰でもアクセス可能（認証なし）
+# Step 8: JWT 認証 + ロールベースアクセス制御を追加
 #
-# 【変わったこと】
-# 1. `robots_db = {}` → `RobotRepository` (DI で注入)
-# 2. `uuid4()` で ID 生成 → DB が UUID を自動生成
-# 3. 辞書操作 → `await repo.create()`, `await repo.list_all()` など
-# 4. データがサーバー再起動後も残る！
+# 【エンドポイントごとの権限設計】
+#   GET    /robots       → 認証済みユーザー全員（viewer 以上）
+#   POST   /robots       → operator 以上
+#   GET    /robots/{id}  → 認証済みユーザー全員
+#   PATCH  /robots/{id}  → operator 以上
+#   DELETE /robots/{id}  → admin のみ
 #
-# 【変わらなかったこと】
-# - URL パス（/robots, /robots/{id}）
-# - HTTP メソッド（GET, POST, PATCH, DELETE）
-# - リクエスト/レスポンスの形式（schemas.py は同じ）
-# - ステータスコード（200, 201, 404 など）
-# → REST API の設計が良ければ、内部実装の変更がインターフェースに影響しない！
+# 権限のグラデーション:
+#   viewer < operator < admin
 #
 # =============================================================================
 
@@ -32,28 +29,20 @@ from app.api.v1.schemas import (
     RobotResponse,
     RobotUpdate,
 )
-from app.api.v1.dependencies import get_robot_repository
+from app.api.v1.dependencies import (
+    get_robot_repository,
+    get_current_user,
+    require_role,
+)
 from app.domain.entities.robot import Robot, RobotStatus, RobotType
+from app.domain.entities.user import User
 from app.domain.repositories.robot_repo import RobotRepository
 
-# =============================================================================
-# APIRouter の作成
-# =============================================================================
 router = APIRouter()
 
 
-# =============================================================================
-# ヘルパー: ドメインエンティティ → レスポンススキーマ 変換
-# =============================================================================
-#
-# 【なぜ変換が必要？】
-# Robot (dataclass) と RobotResponse (Pydantic) は別の型。
-# ORM → Entity はリポジトリが担当。
-# Entity → Response は API 層が担当。
-#
-# Pydantic v2 の model_validate() で変換する。
-#
 def _to_response(entity: Robot) -> RobotResponse:
+    """ドメインエンティティ → レスポンススキーマ"""
     return RobotResponse(
         id=entity.id,
         name=entity.name,
@@ -66,31 +55,26 @@ def _to_response(entity: Robot) -> RobotResponse:
 
 
 # =============================================================================
-# GET /robots — ロボット一覧を取得
+# GET /robots — ロボット一覧（認証済み全ユーザー）
 # =============================================================================
 #
-# 【Depends() による DI】
-# `repo: RobotRepository = Depends(get_robot_repository)`
+# 【Depends(get_current_user) を追加するだけで認証保護】
+# Step 7 の `async def list_robots(repo=...)` に
+# `current_user: User = Depends(get_current_user)` を追加するだけ。
 #
-# FastAPI がリクエスト処理時に自動で:
-# 1. get_session() を呼んで DB セッションを取得
-# 2. get_robot_repository(session) を呼んでリポジトリを生成
-# 3. そのリポジトリを repo パラメータに注入
-# 4. リクエスト完了後、セッションを自動で close
-#
-# エンドポイント関数は「リポジトリがある」ことだけ知っていればよく、
-# DB 接続の詳細は一切知らなくてよい。
+# JWT なし → 401 Unauthorized
+# JWT あり → ユーザー情報が current_user に入る
 #
 @router.get(
     "/robots",
     response_model=RobotListResponse,
     summary="ロボット一覧の取得",
-    description="登録されているすべてのロボットの一覧を返す。",
 )
 async def list_robots(
+    current_user: User = Depends(get_current_user),
     repo: RobotRepository = Depends(get_robot_repository),
 ):
-    """全ロボットの一覧を取得する"""
+    """全ロボットの一覧を取得する（要認証）"""
     robots = await repo.list_all()
     items = [_to_response(r) for r in robots]
     total = await repo.count()
@@ -98,16 +82,12 @@ async def list_robots(
 
 
 # =============================================================================
-# POST /robots — 新しいロボットを登録
+# POST /robots — 新規登録（operator 以上）
 # =============================================================================
 #
-# 【ドメインエンティティの生成】
-# API 層でリクエスト (RobotCreate) → ドメインエンティティ (Robot) に変換し、
-# リポジトリに渡して永続化する。
-#
-# 変換の流れ:
-#   RobotCreate (Pydantic) → Robot (dataclass) → RobotModel (ORM) → DB
-#   ↑ API 層                  ↑ ドメイン層        ↑ インフラ層
+# 【require_role() の使い方】
+# Depends(require_role("admin", "operator"))
+# → admin か operator のみ許可。viewer は 403 Forbidden。
 #
 @router.post(
     "/robots",
@@ -117,22 +97,21 @@ async def list_robots(
 )
 async def create_robot(
     body: RobotCreate,
+    current_user: User = Depends(require_role("admin", "operator")),
     repo: RobotRepository = Depends(get_robot_repository),
 ):
-    """新しいロボットを登録する"""
-    # Pydantic スキーマ → ドメインエンティティ
+    """新しいロボットを登録する（operator 以上）"""
     entity = Robot(
         name=body.name,
         robot_type=RobotType(body.robot_type),
         description=body.description,
     )
-
     created = await repo.create(entity)
     return _to_response(created)
 
 
 # =============================================================================
-# GET /robots/{robot_id} — 特定のロボットを取得
+# GET /robots/{robot_id} — 詳細取得（認証済み全ユーザー）
 # =============================================================================
 @router.get(
     "/robots/{robot_id}",
@@ -141,9 +120,10 @@ async def create_robot(
 )
 async def get_robot(
     robot_id: UUID,
+    current_user: User = Depends(get_current_user),
     repo: RobotRepository = Depends(get_robot_repository),
 ):
-    """指定された ID のロボットを取得する"""
+    """指定された ID のロボットを取得する（要認証）"""
     robot = await repo.get_by_id(robot_id)
     if robot is None:
         raise HTTPException(
@@ -154,16 +134,8 @@ async def get_robot(
 
 
 # =============================================================================
-# PATCH /robots/{robot_id} — ロボット情報を部分更新
+# PATCH /robots/{robot_id} — 部分更新（operator 以上）
 # =============================================================================
-#
-# 【部分更新のロジック変更】
-# Step 6: dict を直接書き換え
-# Step 7: エンティティを取得 → フィールド更新 → リポジトリで保存
-#
-# exclude_unset=True は同じ。
-# 「送られたフィールドだけ」を更新する PATCH の仕様は変わらない。
-#
 @router.patch(
     "/robots/{robot_id}",
     response_model=RobotResponse,
@@ -172,10 +144,10 @@ async def get_robot(
 async def update_robot(
     robot_id: UUID,
     body: RobotUpdate,
+    current_user: User = Depends(require_role("admin", "operator")),
     repo: RobotRepository = Depends(get_robot_repository),
 ):
-    """指定された ID のロボット情報を更新する（部分更新）"""
-    # --- 既存データの取得 ---
+    """指定された ID のロボット情報を更新する（operator 以上）"""
     robot = await repo.get_by_id(robot_id)
     if robot is None:
         raise HTTPException(
@@ -183,9 +155,7 @@ async def update_robot(
             detail=f"ロボットが見つかりません: {robot_id}",
         )
 
-    # --- 部分更新: 送られたフィールドだけ書き換え ---
     update_data = body.model_dump(exclude_unset=True)
-
     if not update_data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -206,8 +176,13 @@ async def update_robot(
 
 
 # =============================================================================
-# DELETE /robots/{robot_id} — ロボットを削除
+# DELETE /robots/{robot_id} — 削除（admin のみ）
 # =============================================================================
+#
+# 【admin のみに制限する理由】
+# 削除は取り消しが難しい操作。最小権限の原則に従い、
+# admin だけが実行できるようにする。
+#
 @router.delete(
     "/robots/{robot_id}",
     response_model=MessageResponse,
@@ -215,10 +190,10 @@ async def update_robot(
 )
 async def delete_robot(
     robot_id: UUID,
+    current_user: User = Depends(require_role("admin")),
     repo: RobotRepository = Depends(get_robot_repository),
 ):
-    """指定された ID のロボットを削除する"""
-    # 削除前に名前を取得（メッセージ用）
+    """指定された ID のロボットを削除する（admin のみ）"""
     robot = await repo.get_by_id(robot_id)
     if robot is None:
         raise HTTPException(

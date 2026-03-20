@@ -1,114 +1,311 @@
 // =============================================================================
-// Step 6: API クライアント — fetch() によるバックエンド通信
+// Step 8: API クライアント — 認証対応版
 // =============================================================================
 //
-// 【Step 5 までとの違い】
-// Step 5 まで: フロントエンド → Gateway (WebSocket) のみ
-// Step 6 から: フロントエンド → Backend (REST API) も追加
+// 【Step 7 からの変更点】
+// 1. Authorization ヘッダーの自動付与（Bearer トークン）
+// 2. login() / signup() / refreshToken() 関数の追加
+// 3. 401 レスポンス時のトークン自動リフレッシュ
+// 4. ログアウト処理（トークン削除 + リダイレクト）
 //
-// このファイルはバックエンドの REST API と通信するための関数群。
-// WebSocket (リアルタイム通信) とは別に、
-// ロボットの CRUD 操作は普通の HTTP リクエストで行う。
+// 【Bearer トークンとは？】
+// HTTP リクエストのヘッダーに含めるアクセストークン。
 //
-// 【fetch() API とは？】
-// ブラウザ組み込みの HTTP クライアント。
-// XMLHttpRequest の後継で、Promise ベースの API。
+//   Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 //
-// fetch() の基本構文:
-//   const response = await fetch(url, options);
-//   const data = await response.json();
+// "Bearer" は「この文字列の持ち主（bearer）を認証する」という意味。
+// OAuth 2.0 で標準化された方式（RFC 6750）。
 //
-// 【async/await とは？】
-// 非同期処理を同期処理のように書ける構文。
-//   async: この関数は非同期ですと宣言
-//   await: Promise の結果が返るまで待つ
+// 【トークンリフレッシュのフロー】
+// 1. API リクエスト → 401 Unauthorized が返る
+// 2. Refresh Token を使って新しい Access Token を取得
+// 3. 新しいトークンで元のリクエストをリトライ
+// 4. リフレッシュも失敗 → ログアウト（ログインページへ）
 //
-// 内部的には Promise を使っているが、
-// .then().then().catch() のチェーンよりも読みやすい。
+// このパターンは「サイレントリフレッシュ」と呼ばれ、
+// ユーザーに再ログインを強制しないUXを実現する。
 //
 // =============================================================================
 
 // =============================================================================
 // API ベース URL
 // =============================================================================
-//
-// 【なぜ環境変数的に管理する？】
-// 開発環境: http://localhost:8000（直接バックエンドに接続）
-// 本番環境: /api/v1（Nginx のリバースプロキシ経由）
-//
-// Step 6 では開発環境のみ対応。
-// Step 13（プロダクション）で Nginx 経由に切り替える。
-//
 const API_BASE_URL = `http://${window.location.hostname || "localhost"}:8000/api/v1`;
 
 // =============================================================================
-// 共通の fetch ラッパー
+// トークン管理ヘルパー
 // =============================================================================
 //
-// 【なぜラッパーを作る？】
-// fetch() 呼び出しには毎回同じヘッダーやエラーハンドリングが必要。
-// それを共通化して DRY（Don't Repeat Yourself）にする。
+// 【localStorage の使い方】
+// Key-Value 形式でブラウザにデータを永続保存する。
 //
-// Step 8 で認証ヘッダー（Authorization: Bearer <token>）を追加するときも、
-// ここを1箇所変更するだけで全 API リクエストに反映される。
+//   localStorage.setItem("key", "value")  // 保存
+//   localStorage.getItem("key")           // 取得（なければ null）
+//   localStorage.removeItem("key")        // 削除
 //
-// 【レスポンスの ok チェック】
-// fetch() は HTTP エラー（404, 500 など）でも reject しない！
-// response.ok で成功レスポンス (200-299) かどうかを手動でチェックする必要がある。
-// これは初心者が最もハマりやすいポイント。
+// 注意: localStorage は XSS（クロスサイトスクリプティング）に脆弱。
+// 悪意のあるスクリプトが localStorage を読み取れてしまう。
+// 本番環境では httpOnly Cookie を使うべき（Step 13 で扱う）。
 //
-async function apiRequest(path, options = {}) {
+
+/**
+ * 保存された Access Token を取得
+ * @returns {string|null}
+ */
+export function getAccessToken() {
+  return localStorage.getItem("access_token");
+}
+
+/**
+ * 保存された Refresh Token を取得
+ * @returns {string|null}
+ */
+export function getRefreshToken() {
+  return localStorage.getItem("refresh_token");
+}
+
+/**
+ * トークンペアを保存
+ */
+export function saveTokens(accessToken, refreshToken) {
+  localStorage.setItem("access_token", accessToken);
+  localStorage.setItem("refresh_token", refreshToken);
+}
+
+/**
+ * トークンを削除してログアウト
+ */
+export function clearTokens() {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+}
+
+/**
+ * ログイン状態の判定
+ *
+ * 【JWT の構造】
+ * Header.Payload.Signature の3パートで構成。
+ * Payload をデコードすれば exp（有効期限）が読める。
+ *
+ * ただし、ここではトークンの「存在有無」のみで判定。
+ * 有効期限のチェックはサーバー側で行う。
+ */
+export function isLoggedIn() {
+  return !!getAccessToken();
+}
+
+/**
+ * JWT ペイロードをデコードして現在のユーザー情報を取得
+ *
+ * 【JWT のデコード】
+ * JWT は Base64 エンコードされた JSON。
+ * atob() でデコードすれば中身が読める。
+ *
+ * 注意: これは「検証」ではなく「デコード」。
+ * 署名の検証はサーバー側でしか行えない（秘密鍵が必要だから）。
+ */
+export function getCurrentUser() {
+  const token = getAccessToken();
+  if (!token) return null;
+
+  try {
+    // JWT の2番目のパート（Payload）を取得
+    const payload = token.split(".")[1];
+    // Base64 デコード → JSON パース
+    const decoded = JSON.parse(atob(payload));
+    return {
+      id: decoded.sub,
+      username: decoded.name,
+      role: decoded.role,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// =============================================================================
+// 認証不要の API リクエスト（ログイン・サインアップ用）
+// =============================================================================
+
+async function apiRequestNoAuth(path, options = {}) {
   const url = `${API_BASE_URL}${path}`;
 
-  const defaultHeaders = {
-    "Content-Type": "application/json",
-  };
-
   const config = {
-    headers: { ...defaultHeaders, ...options.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
     ...options,
   };
 
-  // --- fetch() の呼び出し ---
-  // fetch() は Promise を返す。await で結果（Response オブジェクト）を待つ。
   const response = await fetch(url, config);
 
-  // --- エラーチェック ---
   if (!response.ok) {
-    // レスポンスボディにエラー詳細が含まれている場合がある
     let errorDetail = `HTTP ${response.status}`;
     try {
       const errorBody = await response.json();
       errorDetail = errorBody.detail || errorDetail;
     } catch {
-      // JSON パースに失敗した場合は status だけ
+      // JSON パースに失敗
     }
     throw new Error(errorDetail);
   }
 
-  // --- レスポンスの JSON パース ---
-  // response.json() も Promise を返すので await する。
   return response.json();
 }
 
-
 // =============================================================================
-// Robot API — CRUD 関数
+// 認証付き API リクエスト（メイン）
 // =============================================================================
 //
-// 【関数名の規則】
-// list ~ : 一覧取得 (GET /resources)
-// get ~   : 1件取得 (GET /resources/{id})
-// create ~: 新規作成 (POST /resources)
-// update ~: 更新     (PATCH /resources/{id})
-// delete ~: 削除     (DELETE /resources/{id})
+// 【401 レスポンスの自動処理】
+// 1. Access Token 付きでリクエスト
+// 2. 401 が返ったら → Refresh Token で新トークンを取得
+// 3. 新 Access Token で元のリクエストをリトライ
+// 4. リフレッシュも失敗 → ログアウト
+//
+// isRetry フラグで無限ループ（リフレッシュ → 401 → リフレッシュ...）を防止。
+//
+async function apiRequest(path, options = {}, isRetry = false) {
+  const url = `${API_BASE_URL}${path}`;
+
+  // --- Authorization ヘッダーの付与 ---
+  const headers = {
+    "Content-Type": "application/json",
+    ...options.headers,
+  };
+
+  const token = getAccessToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const config = {
+    ...options,
+    headers,
+  };
+
+  const response = await fetch(url, config);
+
+  // --- 401 Unauthorized: トークンリフレッシュを試行 ---
+  if (response.status === 401 && !isRetry) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      // リフレッシュ成功 → 元のリクエストをリトライ
+      return apiRequest(path, options, true);
+    } else {
+      // リフレッシュ失敗 → ログアウト
+      logout();
+      throw new Error("セッションが期限切れです。再度ログインしてください。");
+    }
+  }
+
+  if (!response.ok) {
+    let errorDetail = `HTTP ${response.status}`;
+    try {
+      const errorBody = await response.json();
+      errorDetail = errorBody.detail || errorDetail;
+    } catch {
+      // JSON パースに失敗
+    }
+    throw new Error(errorDetail);
+  }
+
+  return response.json();
+}
+
+// =============================================================================
+// トークンリフレッシュ
+// =============================================================================
+//
+// 【リフレッシュトークンの役割】
+// Access Token の有効期限は短い（30分）→ セキュリティ上安全
+// でも30分ごとにログインし直すのは不便。
+// → Refresh Token（有効期限7日）で新しい Access Token を取得。
+//
+// Access Token: 認証用。短命。リクエストごとに送信。盗まれても被害が限定的。
+// Refresh Token: 更新用。長命。トークン更新時のみ送信。
+//
+async function tryRefreshToken() {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+
+  try {
+    const data = await apiRequestNoAuth("/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    saveTokens(data.access_token, data.refresh_token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// =============================================================================
+// ログアウト
+// =============================================================================
+export function logout() {
+  clearTokens();
+  window.location.hash = "#/login";
+  window.dispatchEvent(new Event("auth-changed"));
+}
+
+// =============================================================================
+// 認証 API 関数
+// =============================================================================
+
+/**
+ * ログイン
+ * POST /api/v1/auth/login
+ *
+ * @param {string} username
+ * @param {string} password
+ * @returns {Promise<{access_token, refresh_token, token_type}>}
+ */
+export async function login(username, password) {
+  const data = await apiRequestNoAuth("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+
+  // トークンを保存
+  saveTokens(data.access_token, data.refresh_token);
+  window.dispatchEvent(new Event("auth-changed"));
+
+  return data;
+}
+
+/**
+ * サインアップ
+ * POST /api/v1/auth/signup
+ *
+ * @param {string} username
+ * @param {string} email
+ * @param {string} password
+ * @returns {Promise<Object>} UserResponse
+ */
+export async function signup(username, email, password) {
+  return apiRequestNoAuth("/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({ username, email, password }),
+  });
+}
+
+// =============================================================================
+// Robot API — CRUD 関数（認証ヘッダーが自動付与される）
+// =============================================================================
+//
+// 【Step 7 からの変更】
+// apiRequest() が Authorization ヘッダーを自動挿入するため、
+// 呼び出し側のコードは変わらない。
+// → これが「ラッパー関数」のメリット。1箇所の変更で全 API に反映される。
 //
 
 /**
  * ロボット一覧を取得する
  * GET /api/v1/robots
- *
- * @returns {Promise<{robots: Array, total: number}>}
  */
 export async function listRobots() {
   return apiRequest("/robots");
@@ -117,9 +314,6 @@ export async function listRobots() {
 /**
  * 特定のロボットを取得する
  * GET /api/v1/robots/{id}
- *
- * @param {string} robotId - UUID
- * @returns {Promise<Object>} RobotResponse
  */
 export async function getRobot(robotId) {
   return apiRequest(`/robots/${robotId}`);
@@ -127,10 +321,7 @@ export async function getRobot(robotId) {
 
 /**
  * 新しいロボットを登録する
- * POST /api/v1/robots
- *
- * @param {Object} data - { name, robot_type?, description? }
- * @returns {Promise<Object>} 作成された RobotResponse
+ * POST /api/v1/robots（operator 以上の権限が必要）
  */
 export async function createRobot(data) {
   return apiRequest("/robots", {
@@ -141,11 +332,7 @@ export async function createRobot(data) {
 
 /**
  * ロボット情報を更新する
- * PATCH /api/v1/robots/{id}
- *
- * @param {string} robotId - UUID
- * @param {Object} data - 更新するフィールド
- * @returns {Promise<Object>} 更新された RobotResponse
+ * PATCH /api/v1/robots/{id}（operator 以上の権限が必要）
  */
 export async function updateRobot(robotId, data) {
   return apiRequest(`/robots/${robotId}`, {
@@ -156,10 +343,7 @@ export async function updateRobot(robotId, data) {
 
 /**
  * ロボットを削除する
- * DELETE /api/v1/robots/{id}
- *
- * @param {string} robotId - UUID
- * @returns {Promise<{message: string}>}
+ * DELETE /api/v1/robots/{id}（admin 権限が必要）
  */
 export async function deleteRobot(robotId) {
   return apiRequest(`/robots/${robotId}`, {
