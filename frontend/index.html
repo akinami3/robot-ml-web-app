@@ -1,13 +1,629 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Robot AI Web App</title>
-  </head>
-  <body class="min-h-screen bg-background text-foreground antialiased">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<!--
+  =============================================================================
+  Step 1: Hello WebSocket — フロントエンド（1ファイル版）
+  =============================================================================
+
+  【このファイルの概要】
+  WebSocketサーバーに接続して、テキストメッセージを双方向でやりとりする
+  シンプルなWebページです。
+
+  【HTMLとは？】
+  Webページの「骨格」を定義する言語です。
+  ブラウザはHTMLを読み取って、画面にボタンやテキストを表示します。
+
+  【CSSとは？】
+  HTMLの「見た目」を装飾する言語です。色、サイズ、レイアウトなどを指定します。
+  このファイルでは <style> タグ内に書いています。
+
+  【JavaScriptとは？】
+  Webページに「動き」を付ける言語です。
+  ボタンクリック時の処理、WebSocket通信などを記述します。
+  このファイルでは <script> タグ内に書いています。
+  =============================================================================
+-->
+<html lang="ja">
+<head>
+  <!--
+    【<head>とは？】
+    ページのメタ情報（タイトル、文字コード、スタイルなど）を記述するセクション。
+    画面には直接表示されない情報が入ります。
+  -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Step 1: Hello WebSocket 🌐</title>
+
+  <!-- =======================================================================
+       CSS — ページの見た目を定義
+       ======================================================================= -->
+  <style>
+    /* -----------------------------------------------------------------------
+       【CSS の基本構文】
+       セレクタ { プロパティ: 値; }
+       セレクタ: スタイルを適用する対象（タグ名、クラス名、ID名）
+       プロパティ: 何を変えるか（color, font-size, margin など）
+       値: どう変えるか（red, 16px, 10px など）
+       ----------------------------------------------------------------------- */
+
+    /* ページ全体の基本スタイル */
+    body {
+      /* font-family: 使用するフォント。先頭から順に試し、使えるものを採用 */
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      /* max-width: ページの最大幅。読みやすさのために制限する */
+      max-width: 800px;
+      /* margin: 外側の余白。0 auto = 上下0、左右は自動（中央寄せ） */
+      margin: 0 auto;
+      /* padding: 内側の余白 */
+      padding: 20px;
+      /* background-color: 背景色 */
+      background-color: #1a1a2e;
+      /* color: 文字色 */
+      color: #e0e0e0;
+      /* min-height と box-sizing で画面全体を使う */
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+
+    h1 {
+      color: #00d4ff;
+      /* border-bottom: 下線。1px solid は実線、色を指定 */
+      border-bottom: 2px solid #00d4ff;
+      padding-bottom: 10px;
+    }
+
+    /* 接続状態表示エリア */
+    .status {
+      /* display: flex — 子要素を横並びにするレイアウト方式 */
+      display: flex;
+      /* align-items: 縦方向の揃え位置（center = 中央） */
+      align-items: center;
+      /* gap: 子要素間の隙間 */
+      gap: 10px;
+      margin: 20px 0;
+      padding: 12px 16px;
+      /* border-radius: 角の丸み */
+      border-radius: 8px;
+      background-color: #16213e;
+    }
+
+    /* 接続状態のドット（●） */
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%; /* 50%で完全な円になる */
+      background-color: #dc3545; /* 赤 = 未接続 */
+      /* transition: 値が変わる時にアニメーションする */
+      transition: background-color 0.3s;
+    }
+
+    /* .connected クラスが追加された時の色(緑) */
+    .status-dot.connected {
+      background-color: #28a745;
+    }
+
+    /* コントロールエリア（接続ボタン + 送信フォーム） */
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin: 20px 0;
+      /* flex-wrap: 画面が狭い時に折り返す */
+      flex-wrap: wrap;
+    }
+
+    /* ボタンの共通スタイル */
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      /* cursor: pointer — マウスを合わせた時に指マークになる */
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: bold;
+      transition: opacity 0.2s;
+    }
+
+    button:hover {
+      opacity: 0.85;
+    }
+
+    /* disabled（無効）状態のボタン */
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* 接続ボタン（緑系） */
+    .btn-connect {
+      background-color: #28a745;
+      color: white;
+    }
+
+    /* 切断ボタン（赤系） */
+    .btn-disconnect {
+      background-color: #dc3545;
+      color: white;
+    }
+
+    /* 送信ボタン（青系） */
+    .btn-send {
+      background-color: #007bff;
+      color: white;
+    }
+
+    /* テキスト入力フィールド */
+    input[type="text"] {
+      padding: 10px 14px;
+      border: 1px solid #444;
+      border-radius: 6px;
+      background-color: #16213e;
+      color: #e0e0e0;
+      font-size: 14px;
+      /* flex: 1 — 残りのスペースを全て使う（伸びる） */
+      flex: 1;
+      min-width: 200px;
+    }
+
+    input[type="text"]:focus {
+      /* outline: フォーカス時の外枠線 */
+      outline: none;
+      border-color: #00d4ff;
+    }
+
+    /* クイックコマンドボタンのエリア */
+    .quick-commands {
+      display: flex;
+      gap: 8px;
+      margin: 16px 0;
+      flex-wrap: wrap;
+    }
+
+    .quick-commands button {
+      background-color: #16213e;
+      color: #00d4ff;
+      border: 1px solid #00d4ff;
+      padding: 8px 16px;
+      font-size: 13px;
+    }
+
+    /* メッセージ表示エリア */
+    .messages {
+      background-color: #0f0f23;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 16px;
+      /* max-height + overflow-y: 高さを制限してスクロール可能にする */
+      max-height: 400px;
+      overflow-y: auto;
+      /* font-family: monospace — 等幅フォント（ログ表示向き） */
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 13px;
+    }
+
+    /* 個々のメッセージ */
+    .message {
+      padding: 4px 0;
+      border-bottom: 1px solid #1a1a3e;
+      /* word-break: 長い文字列を折り返す */
+      word-break: break-all;
+    }
+
+    /* 送信メッセージ（自分が送ったもの） */
+    .message.sent {
+      color: #ffd700;
+    }
+
+    /* 受信メッセージ（サーバーから来たもの） */
+    .message.received {
+      color: #00d4ff;
+    }
+
+    /* システムメッセージ（接続・切断の通知） */
+    .message.system {
+      color: #888;
+      font-style: italic;
+    }
+
+    /* タイムスタンプ */
+    .timestamp {
+      color: #666;
+      font-size: 11px;
+    }
+
+    /* 説明テキスト */
+    .help {
+      background-color: #16213e;
+      border-left: 4px solid #00d4ff;
+      padding: 12px 16px;
+      margin: 20px 0;
+      border-radius: 0 8px 8px 0;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* メッセージカウンター */
+    .counter {
+      color: #888;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+
+<body>
+  <!--
+    =======================================================================
+    HTML — ページの構造を定義
+    =======================================================================
+
+    【HTMLの基本構文】
+    <タグ名 属性="値">内容</タグ名>
+
+    【idとは？】
+    HTML要素に付ける「名前」。JavaScriptから要素を取得するのに使う。
+    ページ内で一意（ユニーク）でなければならない。
+    JavaScriptでは document.getElementById("名前") で取得できる。
+  -->
+
+  <h1>🌐 Step 1: Hello WebSocket</h1>
+
+  <!-- 説明テキスト -->
+  <div class="help">
+    💡 Go サーバー（<code>gateway/main.go</code>）と WebSocket で双方向通信します。<br>
+    コマンドを送信すると応答が返り、サーバーから定期的にセンサーデータが届きます。<br>
+    <strong>DevTools（F12）→ Network → WS</strong> タブで通信内容を観察してみましょう！
+  </div>
+
+  <!-- 接続状態の表示 -->
+  <div class="status">
+    <!-- id="statusDot": JavaScriptでクラスを切り替えて色を変える -->
+    <div id="statusDot" class="status-dot"></div>
+    <!-- id="statusText": JavaScriptでテキストを書き換える -->
+    <span id="statusText">未接続</span>
+  </div>
+
+  <!-- 接続・切断ボタン -->
+  <div class="controls">
+    <!--
+      【onclick とは？】
+      ボタンがクリックされた時に実行する JavaScript 関数を指定する。
+      onclick="connectWebSocket()" → クリック時に connectWebSocket() を呼ぶ。
+
+      【disabled とは？】
+      ボタンを無効化する属性。クリックできなくなる。
+      JavaScript で btn.disabled = true/false で切り替えられる。
+    -->
+    <button id="btnConnect" class="btn-connect" onclick="connectWebSocket()">
+      🔌 接続
+    </button>
+    <button id="btnDisconnect" class="btn-disconnect" onclick="disconnectWebSocket()" disabled>
+      ❌ 切断
+    </button>
+  </div>
+
+  <!-- メッセージ送信フォーム -->
+  <div class="controls">
+    <!--
+      【input type="text"】
+      ユーザーがテキストを入力できるフィールド。
+      placeholder: 入力前に表示されるヒントテキスト。
+
+      【onkeydown とは？】
+      キーボードのキーが押された時に実行する処理。
+      event.key === 'Enter' で Enter キーが押されたか判定。
+      && は論理AND: 左がtrueの場合だけ右を実行する。
+    -->
+    <input
+      type="text"
+      id="messageInput"
+      placeholder="コマンドを入力（forward, backward, left, right, stop）"
+      onkeydown="event.key === 'Enter' && sendMessage()"
+      disabled
+    >
+    <button id="btnSend" class="btn-send" onclick="sendMessage()" disabled>
+      📤 送信
+    </button>
+  </div>
+
+  <!-- クイックコマンドボタン -->
+  <div class="quick-commands">
+    <button onclick="sendQuickCommand('forward')" disabled class="quick-cmd">⬆️ forward</button>
+    <button onclick="sendQuickCommand('backward')" disabled class="quick-cmd">⬇️ backward</button>
+    <button onclick="sendQuickCommand('left')" disabled class="quick-cmd">⬅️ left</button>
+    <button onclick="sendQuickCommand('right')" disabled class="quick-cmd">➡️ right</button>
+    <button onclick="sendQuickCommand('stop')" disabled class="quick-cmd">⏹️ stop</button>
+  </div>
+
+  <!-- メッセージ表示エリア -->
+  <h2>📋 メッセージログ</h2>
+  <div id="messages" class="messages">
+    <!-- ここにJavaScriptでメッセージが追加される -->
+  </div>
+  <div id="counter" class="counter">送信: 0 | 受信: 0</div>
+
+  <!--
+    =======================================================================
+    JavaScript — ページの動的な振る舞いを定義
+    =======================================================================
+
+    【<script>タグとは？】
+    JavaScript コードを記述するセクション。
+    ブラウザがこのタグを見つけると、中のコードを実行します。
+
+    【変数宣言: let, const, var の違い】
+    let   — 再代入可能な変数（ブロックスコープ）
+    const — 再代入不可の定数（ブロックスコープ）
+    var   — 古い宣言方法（関数スコープ）← 今は使わない
+  -->
+  <script>
+    // ===================================================================
+    // 変数の宣言
+    // ===================================================================
+
+    // WebSocket 接続オブジェクト
+    // null は「まだ何も入っていない」という特殊な値。
+    // 接続前は null、接続後は WebSocket オブジェクトが入る。
+    let ws = null;
+
+    // メッセージカウンター
+    let sentCount = 0;     // 送信メッセージ数
+    let receivedCount = 0; // 受信メッセージ数
+
+    // サーバーのURL
+    // 【テンプレートリテラル `...` 】
+    // バッククォート(`)で囲むと、${変数} で文字列内に変数を埋め込める。
+    // 通常の文字列 '...' や "..." では変数を埋め込めない。
+    const WS_URL = "ws://localhost:8080/ws";
+
+    // ===================================================================
+    // DOM要素の取得
+    // ===================================================================
+    //
+    // 【document.getElementById() とは？】
+    // HTMLの id 属性を指定して、その要素を JavaScript のオブジェクトとして取得する。
+    // 取得した要素は、テキストの変更、スタイルの変更、属性の変更などが可能。
+    //
+    // 【const で取得する理由】
+    // DOM要素への参照は変わらないので const を使う。
+    // 要素の中身（テキストなど）は変えられるが、参照自体は変えない。
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const btnConnect = document.getElementById("btnConnect");
+    const btnDisconnect = document.getElementById("btnDisconnect");
+    const btnSend = document.getElementById("btnSend");
+    const messageInput = document.getElementById("messageInput");
+    const messagesDiv = document.getElementById("messages");
+    const counterDiv = document.getElementById("counter");
+
+    // クイックコマンドボタンの配列を取得
+    // 【querySelectorAll とは？】
+    // CSSセレクタに一致する全ての要素を配列風オブジェクト（NodeList）で返す。
+    // ".quick-cmd" はクラス名が "quick-cmd" の全要素。
+    const quickCmdButtons = document.querySelectorAll(".quick-cmd");
+
+    // ===================================================================
+    // connectWebSocket — WebSocket 接続を確立する
+    // ===================================================================
+    //
+    // 【function とは？】
+    // JavaScript の関数定義。再利用可能なコードのブロック。
+    // Go の func、Python の def に相当。
+    function connectWebSocket() {
+      // 新しい WebSocket 接続を作成
+      // 【new WebSocket(url) とは？】
+      // ブラウザの WebSocket API を使って、指定されたURLに接続する。
+      // 接続は非同期に行われる（すぐには完了しない）。
+      //
+      // 接続手順:
+      // 1. ブラウザが HTTP リクエストを送信（Upgrade: websocket ヘッダー付き）
+      // 2. サーバーが 101 Switching Protocols で応答
+      // 3. 接続がWebSocketにアップグレードされる
+      ws = new WebSocket(WS_URL);
+
+      // ----- イベントハンドラーの設定 -----
+      //
+      // 【イベントハンドラーとは？】
+      // 「○○が起きたら△△する」という処理の登録。
+      // ws.onopen = function() { ... }  → 接続が開いた時に実行
+      // ws.onmessage = function() { ... } → メッセージ受信時に実行
+      // ws.onclose = function() { ... }  → 接続が閉じた時に実行
+      // ws.onerror = function() { ... }  → エラーが発生した時に実行
+
+      // 接続成功時
+      ws.onopen = function () {
+        addMessage("✅ サーバーに接続しました", "system");
+        setConnectedState(true);
+      };
+
+      // メッセージ受信時
+      // 【event.data とは？】
+      // 受信したメッセージの内容（文字列）。
+      // サーバーから ws.WriteMessage() で送信されたデータがここに届く。
+      ws.onmessage = function (event) {
+        receivedCount++;
+        addMessage(event.data, "received");
+        updateCounter();
+      };
+
+      // 接続が閉じた時
+      // 【event.code とは？】
+      // WebSocket の切断理由コード（数値）。
+      // 1000 = 正常終了、1006 = 異常切断 など。
+      ws.onclose = function (event) {
+        addMessage(
+          `❌ 接続が閉じました（コード: ${event.code}、理由: ${event.reason || "なし"}）`,
+          "system"
+        );
+        setConnectedState(false);
+        ws = null; // 接続オブジェクトをクリア
+      };
+
+      // エラー発生時
+      ws.onerror = function (error) {
+        addMessage("⚠️ WebSocket エラーが発生しました", "system");
+        // 注意: onerror の後に onclose も呼ばれる
+      };
+    }
+
+    // ===================================================================
+    // disconnectWebSocket — WebSocket 接続を切断する
+    // ===================================================================
+    function disconnectWebSocket() {
+      if (ws) {
+        // 【ws.close() とは？】
+        // WebSocket接続を正常に閉じる。
+        // 引数でクローズコード（1000 = 正常終了）と理由を指定できる。
+        ws.close(1000, "ユーザーが切断しました");
+      }
+    }
+
+    // ===================================================================
+    // sendMessage — テキスト入力欄のメッセージを送信する
+    // ===================================================================
+    function sendMessage() {
+      // 入力値を取得
+      // 【.value とは？】
+      // input 要素に入力されているテキストを取得するプロパティ。
+      const text = messageInput.value.trim();
+      // 【.trim() とは？】
+      // 文字列の前後の空白を除去する。" hello " → "hello"
+
+      // 空文字なら何もしない
+      if (!text) return;
+
+      // WebSocket が接続されていなければ何もしない
+      // 【ws.readyState とは？】
+      // WebSocket の現在の状態:
+      //   0 = CONNECTING（接続中）
+      //   1 = OPEN（接続済み = 送受信可能）
+      //   2 = CLOSING（切断処理中）
+      //   3 = CLOSED（切断済み）
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      // メッセージを送信
+      // 【ws.send(data) とは？】
+      // WebSocket経由でサーバーにデータを送信する。
+      // 文字列、ArrayBuffer、Blobを送信できる。
+      ws.send(text);
+
+      // 送信メッセージを画面に表示
+      sentCount++;
+      addMessage(`📤 送信: ${text}`, "sent");
+      updateCounter();
+
+      // 入力欄をクリアしてフォーカスを戻す
+      messageInput.value = "";
+      messageInput.focus();
+    }
+
+    // ===================================================================
+    // sendQuickCommand — クイックコマンドボタンから送信
+    // ===================================================================
+    function sendQuickCommand(command) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      ws.send(command);
+      sentCount++;
+      addMessage(`📤 送信: ${command}`, "sent");
+      updateCounter();
+    }
+
+    // ===================================================================
+    // addMessage — メッセージをログエリアに追加する
+    // ===================================================================
+    //
+    // 【DOM操作とは？】
+    // JavaScript からHTMLの構造（要素の追加、削除、変更）を操作すること。
+    // ここでは新しい <div> 要素を作って、メッセージリストに追加しています。
+    //
+    // 【引数】
+    // text: 表示するテキスト
+    // type: メッセージの種類（"sent", "received", "system"）→ CSSクラスに対応
+    function addMessage(text, type) {
+      // 新しい div 要素を作成
+      // 【document.createElement() とは？】
+      // 新しいHTML要素をJavaScriptで作る関数。
+      // まだページには表示されない（メモリ上にあるだけ）。
+      const div = document.createElement("div");
+
+      // CSSクラスを追加
+      // 【classList.add() とは？】
+      // 要素にCSSクラスを追加する。複数指定可能。
+      // "message" クラス + type に応じたクラス（"sent", "received", "system"）
+      div.classList.add("message", type);
+
+      // 現在時刻のタイムスタンプを作成
+      // 【new Date() とは？】
+      // 現在の日時を表すオブジェクトを作成。
+      // .toLocaleTimeString() で "10:30:00" のような時刻文字列に変換。
+      const time = new Date().toLocaleTimeString();
+
+      // HTML内容を設定
+      // 【innerHTML とは？】
+      // 要素の中のHTMLを文字列で設定するプロパティ。
+      // <span> タグを使ってタイムスタンプとメッセージを構造化。
+      //
+      // ⚠️ セキュリティ注意: innerHTML は XSS（クロスサイトスクリプティング）
+      // 攻撃の原因になる可能性がある。ユーザー入力をそのまま使わないこと。
+      // ここではサーバーからのデータを表示しているが、本番環境では textContent を使うべき。
+      div.innerHTML = `<span class="timestamp">[${time}]</span> ${text}`;
+
+      // メッセージリストに追加
+      // 【appendChild() とは？】
+      // 親要素の末尾に子要素を追加する。
+      // これにより、新しいメッセージがリストの最後に表示される。
+      messagesDiv.appendChild(div);
+
+      // スクロールを最下部に移動（最新メッセージが見えるように）
+      // 【scrollTop と scrollHeight】
+      // scrollTop: 現在のスクロール位置（上からの距離）
+      // scrollHeight: コンテンツの総高さ
+      // scrollTop = scrollHeight にすると、最下部までスクロールする。
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // ===================================================================
+    // setConnectedState — UI の接続状態を更新する
+    // ===================================================================
+    //
+    // 【この関数の役割】
+    // 接続/切断に応じて、画面上のボタンの有効/無効、
+    // ステータス表示の色とテキストを一括で切り替える。
+    function setConnectedState(connected) {
+      if (connected) {
+        // 接続中の状態
+        statusDot.classList.add("connected");
+        statusText.textContent = "接続中 (" + WS_URL + ")";
+        btnConnect.disabled = true;
+        btnDisconnect.disabled = false;
+        btnSend.disabled = false;
+        messageInput.disabled = false;
+        messageInput.focus();
+        // 全クイックコマンドボタンを有効化
+        // 【forEach とは？】
+        // 配列の各要素に対して関数を実行する。
+        // (btn) => { ... } はアロー関数（無名関数の短縮構文）。
+        quickCmdButtons.forEach((btn) => { btn.disabled = false; });
+      } else {
+        // 未接続の状態
+        statusDot.classList.remove("connected");
+        statusText.textContent = "未接続";
+        btnConnect.disabled = false;
+        btnDisconnect.disabled = true;
+        btnSend.disabled = true;
+        messageInput.disabled = true;
+        quickCmdButtons.forEach((btn) => { btn.disabled = true; });
+      }
+    }
+
+    // ===================================================================
+    // updateCounter — メッセージカウンターの表示を更新する
+    // ===================================================================
+    function updateCounter() {
+      // 【textContent とは？】
+      // 要素のテキスト内容を設定するプロパティ。
+      // innerHTML と違い、HTMLタグは解釈されない（安全）。
+      counterDiv.textContent = `送信: ${sentCount} | 受信: ${receivedCount}`;
+    }
+  </script>
+</body>
 </html>

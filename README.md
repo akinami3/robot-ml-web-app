@@ -1,315 +1,159 @@
-# Robot AI Web Application
+# Step 1: Hello WebSocket 🌐
 
-ロボットのリアルタイム操作・センサ情報可視化・データ収集・RAG機能を提供するプロダクションレベルのWebアプリケーション。
+> **ブランチ**: `step/01-hello-websocket`  
+> **前のステップ**: —（最初のステップ）  
+> **次のステップ**: `step/02-protocol-messages`
 
-## アーキテクチャ概要
+---
+
+## このステップで学ぶこと
+
+1. **WebSocket** — HTTP との違い、双方向リアルタイム通信の仕組み
+2. **Go 言語の基礎** — `main` 関数、パッケージ、`net/http`、gorilla/websocket
+3. **HTML / JavaScript の基礎** — DOM操作、イベントリスナー、`WebSocket` API
+4. **ブラウザ DevTools** — Network タブで WebSocket 通信を観察
+
+---
+
+## 構成図
 
 ```
-┌─────────────┐   WebSocket(WSS)  ┌──────────────┐   Adapter I/F    ┌──────────┐
-│  Frontend   │◄─────────────────►│   Gateway    │◄────────────────►│  Robots  │
-│  (React)    │                   │   (Go)       │  Plugin System   │          │
-└──────┬──────┘                   └──────┬───────┘                  └──────────┘
-       │ REST API (HTTPS)                │ Redis Streams / gRPC
-       ▼                                 ▼
-┌──────────────┐              ┌──────────────┐
-│   Backend    │◄─────────────│    Redis     │
-│  (FastAPI)   │  Subscribe   │  (Streams)   │
-└──────┬───────┘              └──────────────┘
-       │
-       ▼
-┌──────────────────────────────────────┐
-│  PostgreSQL (TimescaleDB + pgvector) │
-└──────────────────────────────────────┘
-       ▲
-       │ HTTP API
-┌──────┴───────┐
-│   Ollama     │
-│  (Llama 3)   │
-└──────────────┘
+┌──────────────────┐     WebSocket (ws://)     ┌──────────────────┐
+│   ブラウザ        │◄──────────────────────────►│  Go サーバー      │
+│   index.html     │    双方向リアルタイム通信     │  main.go         │
+│                  │                            │                  │
+│  テキスト入力     │  ── "forward" ──────────►  │  メッセージ受信    │
+│  で送信ボタン     │                            │  → ログ出力       │
+│                  │  ◄── "speed: 0.5 m/s" ──  │  → レスポンス返送  │
+│                  │                            │                  │
+│  受信メッセージ   │  ◄── "sensor: 23.5°C" ──  │  定期的に          │
+│  をリスト表示     │     （1秒ごと）              │  モックデータ送信  │
+└──────────────────┘                            └──────────────────┘
 ```
 
-![](./docs/system-architecture.drawio.svg)
-
-## 技術スタック
-
-| 領域 | 技術 |
-|---|---|
-| Frontend | React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui |
-| Backend | Python 3.12 + FastAPI + SQLAlchemy 2.0 + Alembic |
-| Gateway | Go 1.23 + gorilla/websocket + MessagePack |
-| Database | PostgreSQL 16 + TimescaleDB + pgvector |
-| Cache/Broker | Redis 7 (Streams) |
-| LLM | Ollama + Llama 3 |
-| CI/CD | GitHub Actions |
-| Container | Docker + Docker Compose |
-| Docs | MkDocs (Material for MkDocs) |
-
-## 前提条件
-
-- **Docker** >= 24.0 & **Docker Compose** >= 2.20
-- **Git** >= 2.40
-- (開発時のみ) Node.js >= 20, Python >= 3.12, Go >= 1.23
-
-## クイックスタート
-
-### 1. リポジトリのクローン
-
-```bash
-git clone <repository-url>
-cd robot-ml-web-app
-```
-
-### 2. 環境変数の設定
-
-```bash
-cp .env.example .env
-# .env を編集して必要な値を設定（特にパスワード類）
-```
-
-### 3. JWT用RSA鍵の生成
-
-```bash
-mkdir -p keys
-openssl genrsa -out keys/private.pem 2048
-openssl rsa -in keys/private.pem -pubout -out keys/public.pem
-```
-
-### 4. 起動（開発モード）
-
-```bash
-# 全サービス起動
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-
-# docker compose (V2 plugin) が使えない場合は docker-compose (standalone) を使用
-# docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-
-# ログ確認
-docker compose logs -f
-
-# DBマイグレーション（初回のみ）
-docker compose exec backend alembic upgrade head
-
-# Ollama に Llama 3 モデルをダウンロード（初回のみ）
-docker compose exec ollama ollama pull llama3
-docker compose exec ollama ollama pull nomic-embed-text
-```
-
-### 5. アクセス
-
-| サービス | 本番 URL | 開発 URL |
-|---|---|---|
-| Frontend | http://localhost:3000 | http://localhost:5173 |
-| Backend API | http://localhost:8000/api/v1 | http://localhost:8000/api/v1 |
-| Backend Docs (Swagger) | http://localhost:8000/docs | http://localhost:8000/docs |
-| Gateway WebSocket | ws://localhost:8080/ws | ws://localhost:8080/ws |
-| PostgreSQL | - | localhost:15432 |
-| Redis | - | localhost:16379 |
-| MkDocs (設計書) | http://localhost:8888 | (要 `mkdocs serve`) |
-
-### 6. 初期ユーザー登録・ログイン
-
-1. ブラウザで Frontend URL にアクセス
-2. ログイン画面の "Sign up" リンクをクリック
-3. ユーザー名、メールアドレス、パスワードを入力してアカウント作成
-4. 登録後、自動的にログインされます
-
-または、APIで直接ユーザー登録も可能です：
-
-```bash
-curl -X POST http://localhost:8000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "email": "admin@example.com", "password": "changeme123"}'
-```
-
-## 開発ガイド
-
-### ディレクトリ構成
+## ファイル構成
 
 ```
 robot-ml-web-app/
-├── frontend/          # React + TypeScript (Vite)
-├── backend/           # FastAPI (Python)
-├── gateway/           # Go WebSocket Gateway
-├── proto/             # 共通 Protocol Buffers 定義
-├── docs/              # MkDocs 設計書
-├── scripts/           # ユーティリティスクリプト
-├── deploy/            # デプロイ設定 (k8s, nginx)
-├── docker-compose.yml         # 基本構成
-├── docker-compose.dev.yml     # 開発用オーバーライド
-├── docker-compose.prod.yml    # 本番用オーバーライド
-└── .github/workflows/         # CI/CD
+├── gateway/
+│   ├── main.go         ← Go WebSocket サーバー（1ファイル！）
+│   └── go.mod          ← Go の依存関係定義
+├── frontend/
+│   └── index.html      ← フロントエンド（1ファイル！）
+├── CURRICULUM.md        ← 全ステップの学習カリキュラム
+└── README.md            ← このファイル
 ```
 
-### 個別サービスの開発
+**たった3ファイルです。** Docker 不要、ビルドツール不要。
 
-#### Frontend
+---
 
-```bash
-cd frontend
-npm install
-npm run dev          # 開発サーバー起動 (http://localhost:5173)
-npm run test         # ユニットテスト
-npm run lint         # リント
-npm run build        # ビルド
-```
+## 起動方法
 
-#### Backend
+### 前提条件
 
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-pytest                # テスト
-ruff check .         # リント
-mypy .               # 型チェック
-```
+- **Go** >= 1.22（[インストール方法](https://go.dev/doc/install)）
+- **Webブラウザ**（Chrome / Firefox / Edge）
 
-#### Gateway
+### 1. Go サーバーを起動
 
 ```bash
 cd gateway
-go mod download
-go run cmd/gateway/main.go
-go test ./...          # テスト
-golangci-lint run      # リント
+go run main.go
 ```
 
-### DBマイグレーション
+以下のように表示されればOK:
+```
+🚀 WebSocket サーバー起動: http://localhost:8080
+   WebSocket エンドポイント: ws://localhost:8080/ws
+   Ctrl+C で停止
+```
+
+### 2. ブラウザで開く
+
+`frontend/index.html` をブラウザで直接開きます:
+```bash
+# macOS
+open frontend/index.html
+
+# Linux
+xdg-open frontend/index.html
+
+# または、ブラウザのアドレスバーにファイルパスを入力
+```
+
+### 3. 試してみる
+
+1. 「接続」ボタンをクリック → WebSocket 接続が確立
+2. テキスト入力に `forward` と入力して「送信」 → サーバーに送信される
+3. サーバーからのレスポンスと定期データがリストに表示される
+4. **DevTools を開く**: `F12` → Network タブ → WS フィルター → メッセージを観察!
+
+---
+
+## 💡 WebSocket とは？
+
+### HTTP との違い
+
+```
+【HTTP — リクエスト・レスポンス方式】
+ブラウザ: 「データください」 → サーバー: 「はいどうぞ」
+ブラウザ: 「また欲しいです」 → サーバー: 「はいどうぞ」
+（毎回聞かないとデータがもらえない）
+
+【WebSocket — 双方向通信】
+ブラウザ: 「接続したいです」
+サーバー: 「OK、繋がったよ」
+  ↕  以降、どちらからでもいつでも送信可能  ↕
+サーバー: 「新しいデータだよ」（ブラウザが聞いてなくても送れる）
+ブラウザ: 「コマンド送るよ」
+サーバー: 「了解」「また新しいデータだよ」
+```
+
+### なぜロボット操作に WebSocket が必要？
+
+- ロボットのセンサーデータは **毎秒20〜50回** 更新される
+- HTTP だと毎回リクエストが必要（遅い、サーバー負荷高い）
+- WebSocket なら一度つなげば、サーバーから勝手にデータが流れてくる
+
+---
+
+## 📝 コードの読み方ガイド
+
+### gateway/main.go を読む順序
+
+1. `import` — 使っているパッケージを確認
+2. `main()` — プログラムの起動処理
+3. `handleWebSocket()` — WebSocket 接続時の処理
+4. `readPump()` — クライアントからメッセージを受信するループ
+5. `writePump()` — クライアントにデータを送信するループ
+
+### frontend/index.html を読む順序
+
+1. `<body>` — HTML の構造（ボタン、入力欄、メッセージリスト）
+2. `<script>` — JavaScript のロジック
+3. `connectWebSocket()` — WebSocket 接続を確立
+4. `ws.onmessage` — サーバーからメッセージを受信した時の処理
+5. `sendMessage()` — テキストをサーバーに送信
+
+---
+
+## 🏋️ チャレンジ課題
+
+Step 2 に進む前に、以下を試してみましょう:
+
+1. **送信メッセージを変えてみよう**: `forward` 以外に `backward`, `left`, `right` を送ってみる。サーバーの応答はどう変わる？
+2. **送信間隔を変えてみよう**: `main.go` の `time.Second` を `500 * time.Millisecond` に変えたらどうなる？
+3. **複数タブで接続**: ブラウザの別タブでも `index.html` を開いて接続してみよう。両方にデータが届く？
+4. **DevTools で観察**: Network → WS タブで、メッセージのサイズとタイミングを確認しよう
+5. **サーバーを止めてみよう**: `Ctrl+C` でサーバーを止めたら、ブラウザ側はどうなる？
+
+---
+
+## 次のステップへ
+
+Step 2 では、テキストベースの通信を **構造化メッセージ（JSON / MessagePack）** に進化させます:
 
 ```bash
-# マイグレーション作成
-docker compose exec backend alembic revision --autogenerate -m "description"
-
-# マイグレーション実行
-docker compose exec backend alembic upgrade head
-
-# ロールバック
-docker compose exec backend alembic downgrade -1
+git checkout step/02-protocol-messages
 ```
-
-### Proto定義の更新
-
-```bash
-./scripts/generate-proto.sh
-```
-
-### テスト
-
-```bash
-# 全テスト実行
-./scripts/test.sh
-
-# 個別
-./scripts/test.sh frontend
-./scripts/test.sh backend
-./scripts/test.sh gateway
-```
-
-### DBバックアップ
-
-```bash
-./scripts/backup-db.sh
-```
-
-### OSSライセンス一覧生成
-
-```bash
-./scripts/generate-licenses.sh
-```
-
-## 主要機能
-
-### 🕹️ 手動操作
-- 仮想ジョイスティック / WASDキーボード操作
-- リアルタイム速度指令送信 (WebSocket)
-- 操作排他制御 (1ロボット1ユーザー)
-
-### 🗺️ ナビゲーション操作
-- 地図上でのゴール位置指定
-- パス表示・ナビステータス
-- ウェイポイント設定
-
-### 📊 センサ情報可視化
-- LiDAR点群 (Three.js 3D表示)
-- カメラストリーム
-- IMU 3D可視化
-- 時系列グラフ (Recharts)
-
-### 💾 データ収集・ML
-- センサ種別単位で保存対象を選択
-- 記録開始/停止制御
-- データセットエクスポート (CSV/Parquet)
-
-### 🤖 RAG (Retrieval-Augmented Generation)
-- ドキュメントアップロード (PDF/MD/TXT)
-- Local LLM (Llama 3) による回答生成
-- センサデータメタデータの自動RAGソース化
-
-### 🛡️ 安全機能
-- 緊急停止 (E-Stop) — 全画面常時表示、WebSocket+REST二重経路
-- 操作タイムアウト — 無操作時自動停止
-- 速度制限 — 設定値超過時の自動クランプ
-- 監査ログ — 全操作の改ざん不可能な記録
-
-## 新しいロボットの追加方法
-
-Gateway の Adapter インターフェースを実装することで新しいロボットプロトコルを追加できます。
-詳細は [新ロボット追加ガイド](docs/docs/guides/adding-robot.md) を参照してください。
-
-## 設計書
-
-```bash
-cd docs
-pip install mkdocs-material mkdocs-mermaid2-plugin
-mkdocs serve -a 0.0.0.0:8888
-```
-
-http://localhost:8888 で設計書を閲覧できます。
-
-## トラブルシューティング
-
-### Docker Compose が起動しない
-
-```bash
-# Docker デーモンの確認
-sudo systemctl status docker
-
-# ポート競合の確認
-sudo lsof -i :3000
-sudo lsof -i :8000
-sudo lsof -i :8080
-
-# クリーンスタート
-docker compose down -v
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
-
-### Ollama モデルのダウンロードが遅い
-
-```bash
-# 直接Ollamaコンテナ内で確認
-docker compose exec ollama ollama list
-docker compose exec ollama ollama pull llama3 --verbose
-```
-
-### DBマイグレーションエラー
-
-```bash
-# 現在のリビジョン確認
-docker compose exec backend alembic current
-
-# 全リセット（開発環境のみ）
-docker compose exec backend alembic downgrade base
-docker compose exec backend alembic upgrade head
-```
-
-### WebSocket 接続が切れる
-
-- ブラウザのDevTools → Network → WS で接続状態を確認
-- Gateway のログを確認: `docker compose logs gateway -f`
-- StatusBar の接続状態表示で Gateway/Robot の状態を確認
-
-## ライセンス
-
-MIT License - 詳細は [LICENSE](LICENSE) を参照
