@@ -1,62 +1,155 @@
-# Step 4: センサー可視化ダッシュボード 📡
+# Step 11: データ記録・管理 📼
+
+> **ブランチ**: `step/11-data-recording`
+> **前のステップ**: `step/10-realtime-dashboard`
+> **次のステップ**: `step/12-rag-system`
+
+---
+
+## このステップで学ぶこと
+
+1. **Redis Streams** — `XADD` / `XREADGROUP` / `XACK` によるメッセージキューイング
+2. **Consumer Group パターン** — 並列データ処理の基礎
+3. **バックグラウンドワーカー** — asyncio ライフサイクル管理
+4. **TimescaleDB** — 時系列データの hypertable と `time_bucket()`
+5. **JSONB / ARRAY カラム** — 柔軟なスキーマ設計
+
+---
 
 ## 概要
 
-4種類のセンサーデータをリアルタイムに Canvas / SVG で可視化するステップ。
-MockAdapter を拡張してLiDAR・IMU データを生成し、ブラウザ上で描画する。
+センサーデータの記録・管理基盤を構築するステップ。
+Gateway が WebSocket で受信したセンサーデータを **Redis Streams** に XADD し、
+バックエンドの **バックグラウンドワーカー** が Consumer Group で読み取り、
+PostgreSQL（TimescaleDB）に永続化する。
+記録セッション（Recording）の開始/停止とデータセット（Dataset）の管理機能も実装する。
+
+---
+
+## アーキテクチャ
+
+```
+┌──────────┐    WebSocket    ┌──────────┐    XADD     ┌──────────┐
+│ ブラウザ   │◄──────────────►│ Gateway  │────────────►│  Redis   │
+│           │                │ (Go)     │             │ Streams  │
+└──────────┘                └──────────┘             └────┬─────┘
+                                                          │ XREADGROUP
+┌──────────┐    REST API     ┌──────────┐                 │
+│ フロント   │───────────────►│ Backend  │◄────────────────┘
+│ React     │◄───────────────│ (Python) │
+└──────────┘                │          │    INSERT
+                             │ Worker   │──────────►┌────────────┐
+                             └──────────┘           │ PostgreSQL │
+                                                    │ TimescaleDB│
+                                                    └────────────┘
+```
+
+---
 
 ## 学習ポイント
 
-### Canvas 2D API
-- `<canvas>` 要素と `getContext('2d')` による描画
-- 座標変換（translate, rotate）
-- requestAnimationFrame ではなく WebSocket メッセージ駆動の更新
+### Redis Streams
 
-### SVG（Scalable Vector Graphics）
-- `<circle>` と `stroke-dasharray` / `stroke-dashoffset` による円形ゲージ
-- Canvas との使い分け: UIパーツ → SVG、高頻度更新 → Canvas
+```
+# Gateway → Redis（データ送信）
+XADD sensor:data * robot_id "mock-001" type "lidar" data "{...}"
 
-### ES Classes とプライベートフィールド
-- `class` 構文による OOP
-- `#field` でプライベートフィールドを宣言（ES2022）
-- コンストラクタでの依存性注入パターン
+# Worker → Redis（データ受信、Consumer Group）
+XREADGROUP GROUP sensor-workers worker-1 COUNT 100 BLOCK 5000 STREAMS sensor:data >
+XACK sensor:data sensor-workers <message-id>
+```
 
-### センサーデータの基礎
-| センサー | 周波数 | データ内容 |
-|----------|--------|------------|
-| LiDAR | 10 Hz | 360点の距離データ（極座標） |
-| IMU | 50 Hz | 加速度 3軸 + ジャイロ 3軸 |
-| Odometry | 10 Hz | 位置 (x,y)、向き θ、速度 |
-| Battery | 1 Hz | 残量 %、電圧、温度 |
+- **XADD**: ストリームにメッセージを追加
+- **XREADGROUP**: Consumer Group でメッセージを読み取り
+- **XACK**: 処理完了の確認応答
 
-### 外部 CSS
-- `<style>` タグからの分離
-- CSSファイルのキャッシュメリット
-- BEM 風のクラス命名
+### Recording セッションの状態遷移
+
+```
+  ┌───── POST /start ──────┐
+  │                        ▼
+[idle] ─────────────► [recording] ─── POST /{id}/stop ──► [completed]
+```
+
+### エンドポイント一覧
+
+| メソッド | エンドポイント | 役割 |
+|----------|--------------|------|
+| POST | `/api/v1/recordings/start` | 記録開始 |
+| POST | `/api/v1/recordings/{id}/stop` | 記録停止 |
+| GET | `/api/v1/recordings` | 記録セッション一覧 |
+| GET | `/api/v1/datasets` | データセット一覧 |
+| POST | `/api/v1/datasets` | データセット作成 |
+| DELETE | `/api/v1/datasets/{id}` | データセット削除 |
+| GET | `/api/v1/sensors/latest` | 最新センサーデータ |
+
+---
 
 ## ファイル構成
 
 ```
 gateway/
   internal/
-    adapter/mock/
-      mock_adapter.go  ← LiDAR + IMU 生成を追加
+    bridge/
+      redis_publisher.go              ← 🆕 Redis Streams XADD パブリッシャー
+    server/
+      websocket.go                    ← Redis publish 連携追加
+  cmd/gateway/
+    main.go                           ← RedisPublisher 初期化
+  go.mod                              ← go-redis/v9 依存追加
 
-frontend/
-  index.html           ← 外部CSS参照 + ダッシュボードレイアウト
-  css/
-    style.css          ← 外部CSS（auto-fill グリッド）
-  js/
-    protocol-base.js   ← Step 2 から継続
-    protocol.js        ← Step 3 から継続
-    websocket-client.js ← WebSocket をクラスで管理
-    app.js             ← センサーデータのルーティング
-    sensors/
-      lidar-viewer.js  ← LiDAR 極座標プロット
-      imu-chart.js     ← IMU 6軸リアルタイムチャート
-      battery-gauge.js ← SVG 円形バッテリーゲージ
-      odometry.js      ← 軌跡付きミニマップ
+backend/
+  app/
+    main.py                           ← api_router 統合、Worker ライフサイクル
+    domain/
+      entities/
+        sensor_data.py                ← 🆕 SensorData エンティティ
+        recording.py                  ← 🆕 RecordingSession エンティティ
+        dataset.py                    ← 🆕 Dataset エンティティ
+        audit_log.py                  ← 🆕 AuditLog エンティティ
+      repositories/
+        sensor_data_repo.py           ← 🆕 SensorDataRepository
+        recording_repo.py             ← 🆕 RecordingRepository
+        dataset_repo.py               ← 🆕 DatasetRepository
+        audit_log_repo.py             ← 🆕 AuditLogRepository
+      services/
+        recording_service.py          ← 🆕 記録セッション管理
+        dataset_service.py            ← 🆕 データセット管理
+        audit_service.py              ← 🆕 監査ログ記録
+    infrastructure/
+      redis/
+        connection.py                 ← 🆕 Redis 接続管理
+        recording_worker.py           ← 🆕 Stream Consumer ワーカー
+      database/
+        models.py                     ← SensorData, Recording, Dataset モデル追加
+        repositories/
+          sensor_data_repo.py         ← 🆕 TimescaleDB time_bucket
+          recording_repo.py           ← 🆕 SQLAlchemy 実装
+          dataset_repo.py             ← 🆕 SQLAlchemy 実装
+          audit_log_repo.py           ← 🆕 SQLAlchemy 実装
+    api/v1/
+      router.py                       ← 🆕 統合ルーター
+      recordings.py                   ← 🆕 記録エンドポイント
+      datasets.py                     ← 🆕 データセットエンドポイント
+      sensors.py                      ← 🆕 センサーエンドポイント
+    core/
+      logging.py                      ← 🆕 structlog 構造化ログ
+  pyproject.toml                      ← redis, structlog 依存追加
+
+frontend/src/
+  pages/
+    DataManagementPage.tsx            ← 🆕 データ管理 UI
+  services/
+    api.ts                            ← recordingApi, datasetApi, sensorApi 追加
+  types/
+    index.ts                          ← Recording, Dataset 型定義追加
+  App.tsx                             ← /data ルート追加
+  components/layout/Sidebar.tsx       ← Data Management ナビ追加
+
+docker-compose.yml                    ← 5 サービス構成（+Redis）
 ```
+
+---
 
 ## 起動方法
 
@@ -64,31 +157,50 @@ frontend/
 docker compose up --build
 ```
 
-ブラウザで http://localhost:3000 を開き、「WS接続」→「ロボット接続」。
+| サービス | ポート | 説明 |
+|----------|--------|------|
+| frontend | 3000 | Vite 開発サーバー |
+| backend | 8000 | FastAPI + Worker |
+| gateway | 8080 | WebSocket + Redis Publisher |
+| postgres | 5432 | PostgreSQL |
+| redis | 6379 | Redis Streams |
 
-## MockAdapter の LiDAR シミュレーション
+### 試してみる
 
-MockAdapter は仮想的な部屋（10m × 8m）を定義し、ロボットの位置から
-各角度方向にレイキャスト（光線追跡）を行って壁までの距離を計算する。
+1. ログイン後、サイドバー「データ管理」を開く
+2. 「記録開始」をクリック → センサーデータの記録が開始
+3. しばらく待って「記録停止」→ セッションが保存される
+4. データセットを作成して記録データをグループ化
 
+---
+
+## Step 10 からの主な変更
+
+| カテゴリ | 変更内容 |
+|----------|----------|
+| Gateway | Redis Streams へのセンサーデータ XADD |
+| Backend | バックグラウンドワーカー（Consumer Group） |
+| DB | SensorData, Recording, Dataset テーブル追加 |
+| API | 記録・データセット・センサーの REST エンドポイント |
+| フロント | DataManagementPage 追加 |
+| インフラ | Redis サービス追加（5 サービス構成） |
+| ファイル数 | 50 files changed, +7,231 / -150 |
+
+---
+
+## 🏋️ チャレンジ課題
+
+1. **Redis CLI で確認**: `docker compose exec redis redis-cli XLEN sensor:data` でストリーム長を確認
+2. **Consumer Group を観察**: `XINFO GROUPS sensor:data` でグループ情報を確認
+3. **データのエクスポート**: CSV 形式でセンサーデータをダウンロードする API を追加
+4. **データの可視化**: 記録データから時系列グラフを描画するページを追加
+
+---
+
+## 次のステップへ
+
+Step 12 では **RAG（検索拡張生成）** システムを構築し、ドキュメントに基づいた LLM 回答を実現します:
+
+```bash
+git checkout step/12-rag-system
 ```
-       Wall (y=4)
-  ┌─────────────────────┐
-  │                     │
-  │     Robot (0,0) →   │    360点のスキャン
-  │                     │
-  └─────────────────────┘
-       Wall (y=-4)
-```
-
-## Step 3 からの変更差分
-
-| 変更 | 詳細 |
-|------|------|
-| MockAdapter 拡張 | LiDAR (10Hz) + IMU (50Hz) センサー追加 |
-| 外部 CSS | `<style>` → `css/style.css` に分離 |
-| WebSocketClient | 生 WebSocket → クラスで抽象化 |
-| LidarViewer | Canvas: 極座標 → 直交座標変換で点群描画 |
-| ImuChart | Canvas: リングバッファ式 6 軸ラインチャート |
-| BatteryGauge | CSS バー → SVG 円形ゲージ |
-| OdometryViewer | 数値のみ → Canvas ミニマップ + 軌跡描画 |
